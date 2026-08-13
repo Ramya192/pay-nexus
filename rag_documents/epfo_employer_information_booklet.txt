@@ -1,0 +1,557 @@
+EPFO — Information Booklet for Employers of Newly Covered Establishments
+Source: https://www.epfindia.gov.in/site_docs/PDFs/MiscPDFs/Employer_Information_Booklet.pdf
+
+INFORMATION BOOKLET
+For the employers of the newly 
+covered establishments
+EPFO
+Employees’ Provident Fund Organization
+Ministry of Labour & Employment
+Contents
+Contents
+3
+Welcome
+4
+Return of ownership
+5-6
+DSC & E-sign
+02
+7-8
+UAN e-KYC seeding
+Contributions 
+16-18
+Guidelines for e-KYC 
+seeding
+14-15
+Duties & 
+responsibilities
+Closure of PF Code
+11
+Member claims
+13
+9-10
+12
+Penal damages
+Dear Employer,
+EPFO warmly welcomes you to one of the world’s largest social security
+organization.
+EPFO as you would know is responsible for offering social security coverage to
+the organized sector workforce touching millions of lives. It offers its members a
+myriad of services, which includes provident fund, insurance and pension both for
+members and their families.
+EPFO has over 6.42 crore contributory members making it one of the largest
+financial entities in the country. The total corpus of EPFO stood over ₹17 lakh
+crores. In terms of asset size, it ranks 8th among all sovereign pension funds and
+16th among all pension funds of the world.
+We are happy to enter into a partnership with you for ensuring adequate social
+security cover for the nation’s workforce. For this, it is necessary that you are
+aware of the various benefits provided for the members and the requirements to
+be fulfilled at your end so that the common objective of employee well-being can
+be achieved. As a part of ease of doing business, all the functions including
+registration, inspection and payments are made online and physical interaction is
+discouraged.
+In order to support both the employers and the employees in their
+interaction/interface with EPFO information booklets have been prepared for both
+the employers and the employees. This toolkit can be used as a ready reckoner
+for this purpose.
+Welcome
+Welcome03
+EMPLOYERS – A VALUABLE PARTNER IN NATION BUILDING
+Form 5A of EPF is a return of Ownership which is normally submitted
+to the EPFO at the time the company is covered by EPF Schemes for
+the first time . This form shows owners/partners or Directors of the
+company who is responsible for the conduct of the business of the
+company . In form 5A details of employers only is given though the
+company may be managed by the Manager or any the person
+RETURN OF OWNERSHIP
+ After registration and allotment of PF code employers to submit online Form 5A
+using your establishment login credentials. ->Establishment->Form 5A duly
+attested by DSC/e-sign. FORM 5A contains details of ownership and branches of
+establishment, if any and other vital details like Bank A/C number, Mobile Number,
+Email Id etc.
+ Form 5A Return should be updated as and when there is a change in ownership,
+name of the establishment, Address, Bank Account, Mobile Number, E-mail, etc.
+ You can obtain a sub code number for a branch, if required and the same may be
+furnished in Form 5A.
+ To obtain sub code number for branch unit, the same may be furnished under
+Branch/Division details and subsequently furnish the details in Establishment ->
+Branches (Form 2A).
+Form 5A
+RETURN OF OWNERSHIP04
+Online process
+Digital Signature Certificates (DSC) are the digital equivalent (that is
+electronic format) of physical or paper certificates .
+E-Sign is an online electronic signature service that can facilitate an
+Aadhaar holder to digitally sign a document . An Aadhaar holder can
+now sign a document after Biometric/One Time Password
+authentication thus requiring no paper -based application form or
+documents .
+DSC & E-SIGN
+DSC (USB Token) to be registered through establishment login->Establishment-
+>DSC/e-sign -> Digital Signature Registration to generate and download the request
+letter in establishment letter head duly signed by the DSC holder and submit to the
+concerned PF office in duplicate for approval. (Revoke option for de-registration of
+DSC/E-Sign).
+DSC & E-Sign
+DSC & E-SIGN05
+DSC Online process
+E-SIGN to be registered through establishment login->Establishment-> DSC/e-sign ->
+e-sign Registration and select “Click here to register e-sign of a person whose DSC is
+already registered” to generate and download the request letter in establishment
+letter head duly signed by the DSC holder and submit to the concerned PF office in
+duplicate for approval.
+E-SIGN to be registered for Non DSC holder, select -> e-sign Registration and furnish
+the required details (i.e., name as per Aadhaar, designation, gender, Date of Birth and
+VID number) to generate and download the request letter in establishment letter
+head duly signed and submit to the concerned PF office in duplicate for approval.
+E-Sign Online process
+AUTHENTICATING TRANSACTION 
+USING DSC & E-SIGN
+For renewal of DSC, the above said method should be followed.
+-Revoke means de -registration of DSC/E -Sign. In case the revoke 
+button is pressed erroneously, follow the methods as on prepage to re -
+register DSC/e -Sign again.
+-For using DSC, Computer/Laptop should be configured with the 
+support of Mozilla Firefox version 48.0 along with latest Java (32 bit). 
+Further, add the following exceptional sites at Control
+Panel -> Java Security Tab. 
+https:// unifiedportal -emp.epfindia.gov.in /Employer_digital_signature.php -
+https:// unifiedportal -emp.epfindia.gov.in /epfo /activity/ 
+https:// unifiedportalemp.epfindia.gov.in /epfo /activity/ viewMemberActivitySummary / 
+https:// unifiedportalemp.epfindia.gov.in /epfo /digitalSignature /certificate/ getOption
+https:// unifiedportalemp.epfindia.gov.in /epfo /digitalSignature /certificate/ getOption.php
+https:// unifiedportalemp.epfindia.gov.in /epfo /owner/ digitalSignature /certificate/ getOption
+https:// unifiedportal -emp.epfindia.gov.in /
+Important 
+Notes
+DSC & E-SIGN06
+All transactions or requests need to be approved by Digital Signature 
+Certificate(DSC)/e -sign
+DSC is provided by authorised vendors whereas e -sign is a AADHAR 
+based facility for enabling authentication.
+• Provision to create new UAN for employees is available under
+Member -> Register -Individual .
+• Obtain self -declaration in Form 11 (to be retained by the employer
+for future reference) from each member with copies of KYC
+documents .
+• If the employees already having a UAN, the same can be mapped
+to the current establishment by selecting “YES” in Previous
+Employment/UAN . The details of employees' name, date of birth
+and gender should match with the provided in AADHAAR
+• After creation of UAN, the Aadhaar KYC should be approved
+through DSC/e -sign through Member -> Approve KYC pending for
+Digital Signature
+• Registration of Bulk employees also available in Member ->
+Register -Bulk
+• Establishment can also make use of Member Location Mapping
+feature available in the portal to map or link each employee
+locations, in case the establishment has branches . For this
+branches in Form 5A should be furnished
+UAN & KYC SEEDING
+CREATING UAN 
+UAN & KYC SEEDING07
+• Ensure that for employees who are already having a UAN, their mandatory KYC
+details i.e., Aadhaar and Bank account are linked with their UAN. The option for
+linking KYCs in bulk with UAN is available under Member -> KYC BULK.
+• Individual employee can also seed KYCs through their member interface and the
+same may be pending at Member -> Approve KYC seeded by member. The same
+may be approved with DSC/e- sign.
+• Guidelines for Seeding of Mandatory KYCs with UAN explained in detail on page
+16-18 of this document
+SEEDING OF KYCs:
+• By using establishment login employers shall be able to update your
+employee details and file their KYC details also.
+• It is necessary that the profile of all employees enrolled by the
+establishment is complete in all respects and is also updated periodically
+whenever required. If there are missing details, it can use Missing details
+option under the Menu Member for filling the details.
+• Establishments should mark date of Exit in respect of employees who have
+left their employment.
+• Active members list is available in the login to check the member’s details
+along with their UAN and KYC details.
+• Member must be facilitated to activate his UAN through the Employee
+portal
+• Establishments can verify the members AADHAAR Card to compare the
+member’s Name, Gender, Date of Birth recorded in it with that available in
+the database under the ‘Active Members Details’
+• Mismatch of details can be set right by asking the member to raise a
+request online through Employee Portal
+• Approval needs to be done by DSC/e-sign.
+UPDATING EMPLOYEES’ DETAILS AND KYC
+UPDATING UAN 
+UPDATING EMPLOYEES’ DETAILS 08
+• Contribution is to be made mandatorily in respect of employees whose
+salary is Rs.15000 p.m or lower. However, other employees who are paid
+higher can become members on a voluntary basis.
+• An employee can contribute more than 12% of Rs 15,000 if they wish to do
+so. However, there is no obligation that the employer has to match the
+employee’s contribution.
+• To become members on a voluntary basis and to pay contribution on
+higher wages, a joint request from both employer and employee is
+required.
+CONTRIBUTIONS TO THE FUND
+PRESENT RATES
+CONTRIBUTIONS TO THE FUND09
+ Monthly contribution shall be paid by the employer by filing ECR under Payment -
+>ECR/RETURN filing on or before 15th of every month.
+ Monthly contribution shall be paid through ONLINE only.
+ Contribution is rounded to the nearest rupee for each employee.
+ In case the establishment is exempted under EDLI Scheme, (no need to remit
+under A/c.No.21)
+ Inspection charges @ 0.005% on total wages, subject to minimum of Rs.1/- is
+payable in A/c.No.22.
+ Non-remittance of PF contribution deducted from employees’ wages shall be
+construed as Criminal breach of Trust, punishable under section 405/406 of Indian
+Penal Code.
+IMPORTANT NOTES
+
+ Contributions are payable on maximum wage ceiling of Rs .15 ,000 /-
+ The employee can pay at a higher rate (wages above Rs .15 ,000 ) and in
+such case employer is not under any obligation to pay at such higher rate .
+ To pay contribution on higher wages, a joint request from both employer
+and employee is required [Para 26 (6) of EPF Scheme] . In such case
+employer has to pay Administrative charges in A/c .No .2 on the higher
+wages . (wages above Rs .15 ,000 /-).
+ For an International Worker, wage ceiling of Rs .15 ,000 /- is not applicable
+on contribution
+CONTRIBUTIONS UNDER EPF, EPS & EDLI
+EPF, (A/c.No.1)
+CONTRIBUTIONS UNDER EPF, EPS & EDLI10
+ Pension contribution is payable by employer only .
+ Pension contribution should not be recovered from employee .
+ Pension contribution not to be paid when :
+ An employee crosses 58 years of age and is still in service (EPS
+membership ceases on completion of 58 years) .
+ An EPS pensioner is drawing Reduced Pension and re -joins as an
+employee .
+ In both the cases, the pension contribution (8.33 %) is to be added to
+the employer’s share (3.67 %) of PF . i.e., total employer’s share (12 %)
+goes to PF only .
+ In case an employee who is not existing EPF/EPS member joins on
+or after 01 .09 .2014 with wages above Rs .15 ,000 /-, no need to pay
+pension contribution and the total employer’s share (12 %) goes to PF
+only .
+ EDLI Contribution (in A/c .No .21 ) to be paid on up to maximum wage ceiling
+of Rs .15 ,000 /- even if PF is paid on higher wages .
+ EDLI Contribution to be paid even if member has crossed 58 years of age
+and pension contribution is not payable . This is to be paid as long as the
+member is in service and PF is being paid .
+EPS, (A/c.No.1o)
+EDLI, (A/c.No.21)
+o Monthly contribution shall be paid by the employer  
+through the portal https://unifiedportal-
+emp.epfindia.gov.in/epfo/  on or  before 15th of every
+month .
+o ECR format available in Payment -> ECR Upload ->
+click ECR Help File .
+ELECTRONIC
+CHALLAN -
+CUM -RETURN
+(ECR)
+
+ Ensure that all the employees who are enrolled under EPF, their
+member profile is updated . If any missing details are there,
+employer can use missing details option under Member Menu to
+complete it. This will facilitate the members in availing seamless
+service .
+MEMBER CLAIMS
+MEMBER PROFILE
+MEMBER CLAIMS11
+ Ensure that all claims are filed by the employees through online
+mode only to ensure speedy settlement .
+ To enable filing of online claims UAN of the members have
+mandatory KYCs of Aadhaar and bank account .
+ Whenever a member submits transfer claim through online, it has
+to be forwarded to concern EPFO field office immediately . Such
+transfer claims pendency can be viewed by the employer under
+Online Services -> Transfer Claims in the establishment portal .
+ If the member submits manual transfer claim in Form – 13, the
+employer has to promptly attest and forward the Claim to EPF
+Office .
+PF CLAIMS
+TRANSFER CLAIMS
+• Provident fund benefits which makes them financially secure in their
+old age and provide them aid in times of need.
+• Pension benefits in the form of monthly members pension besides
+widow/ widower pension, children pension, Orphan pension,
+Dependent/ Parents pension. The minimum pension is Rs 1000 as of
+now.
+• Insurance benefits linked to the member’s PF accumulations in case
+of death in harness.
+WHAT ARE THE BENEFITS AVAILABLE TO MY EMPLOYEES?
+• In addition to penal damages and penal interest failure to remit
+contributions may result in prosecution and other penal actions.
+• Deduction of PF contribution from the wages of employee and fail to remit
+the same is criminal breach of trust and actions shall be initiated invoking
+the relevant provisions of Indian Penal Code.
+WHAT IF CONTRIBUTIONS ARE NOT 
+MADE?
+• As a part of ease of doing business and digitization of all services, e-inspection
+notice is available in the employer portal for the default period. Employers
+need to submit response within specific time period or else necessary legal
+action would be initiated against the establishment.
+• The damages shall be calculated to the nearest rupee, 0.50 paise or more to
+be counted as the nearest higher rupee and fraction of a rupee less than 0.50
+paise to be ignored.
+• In order to avoid this additional liability, the employer should ensure that
+remittances within the stipulated time, i.e., on or before 15th of every month
+through ECR.
+• For remittance of Penalty use Payments -> ECR/RETURN filing -> Direct
+Challan -> Challan Entry -> Select Miscellaneous charges challan wherein
+Penal Damages for 14B dues and Miscellaneous for 7Q dues.
+Rates of PD 
+and Interest
+PENAL DAMAGES12
+Period of Default Rates of Damages Rate of Penal 
+Interest
+Less than 2 months 5%
+Simple interest at the 
+rate of 12% per 
+annum for each day 
+of the default or 
+delay in payment of 
+contribution.
+2 months and above but less 
+than 4 months 10%
+4 months and above but less 
+than 6 months 15%
+6 months and above
+25%
+(It may correspondingly
+go up to 100%)
+In case of winding up of business or for any other reason, the
+establishment ceases to exist, employer may apply for
+deregistration of the establishment . Request for deregistration may
+be accompanied by relevant supporting documents like Dissolution
+deed, Surrender of Government licenses, copy of Cancellation of
+Rental Agreement . if any . This has to be done promptly, so that the
+establishment is not flagged as non -complying establishment .
+CLOSURE OF PF CODE
+Documentation 
+required
+CLOSURE OF PF CODE13
+Even if there are no eligible employees for making PF contributions
+and the establishment wants to keep the EPF Code, they are
+directed to pay Rs.75 /- per month as the prescribed minimum
+Administrative Charges in A/c .No.2 through Payments ->
+ECR/RETURN filing -> Direct Challan -> Challan Entry -> Select
+Administrative/inspection charges challan under establishment
+portal .
+CONTINUE PF CODE 
+WITHOUT MEMBERS
+DUTIES AND RESPONSIBILITIES OF 
+THE EMPLOYER
+Documentation 
+required
+DUTIES AND RESPONSIBILITIES14
+CCONTINUE PF CODE 
+WITHOUT MEMBERS
+• Enroll all eligible employees for the social security benefits in the
+establishment.
+• In case, engaging services of contract employees, ensure they are
+covered directly under you or through a contractor.
+• In case the contractor has his/her PF code ensure that the same is
+updated in the Principal Employer Portal and ensure compliance.
+• Kindly note that non enrolment defeats the very purpose of the Act and
+Schemes and gives rise to a disgruntled and insecure workforce which
+will be costly in the long run.
+• This is in addition to the various penal actions that would follow.
+• Do not enroll individuals who are not associated with your
+establishment as members by making false declarations.
+• Appoint a responsible officer of your establishment as the Authorised
+Signatory as all actions taken him/her will be legally binding on the 
+employer.
+• In all cases where the employer himself does not transact the business
+and relies on others including the Authorised Signatory for doing the
+same, utmost caution must be exercised as the
+establishment/employer will be held responsible for all acts of
+omission and commission.
+• Take steps to educate your employees about the various schemes and
+their benefits, in particular the KYC details and nomination details of
+your employees are always upto date. This shall enable the members or
+dependents to claim the PF benefits without any hassle.
+• Maintain confidentiality of your establishment’s login credentials and
+do not share them with unauthorized persons.
+DUTIES AND RESPONSIBILITIES OF 
+THE EMPLOYER
+Documentation 
+required
+DUTIES AND RESPONSIBILITIES15
+CCONTINUE PF CODE 
+WITHOUT MEMBERS
+• Assist the members to file online claim whenever they are in need of
+withdrawing from their PF accounts on account of various reasons
+permissible under the scheme like illness, housing, marriage, education 
+etc.
+• When the employee leaves employment assist in either filing transfer
+claim or filing final withdrawal claim of leaving employment on
+retirement.
+• Assist your employee’s family members to claim the EDLI benefits and
+widow or widower pension and children pension in case of unfortunate
+demise of your employee.
+• Please transact all PF related business only through the official
+website:
+Prayaas is an endeavor to release Pension to the eligible
+EPS members on the day of Superannuation . Special
+efforts are being taken by field offices to educate the
+members of the EPS 1995 who are due to superannuate
+within 3 months along with their employers so that they
+can submit pension claims complete d in every respect
+and EPFO can issue PPO on the day of superannuation to
+such members .
+Cooperation and support of the employers is solicited to
+make this noble endeavor successful .
+Prayaas
+
+ Updating the missing members details through “establishment login ->
+Dashboard –> Missing details” .
+ For left employees, to mark Date of Exit through “establishment login ->
+Member -> Member Profile -> search UAN -> mark Date of Exit” and
+approve the same through “Member -> Approvals - >Approve” . For bulk
+uploading use “establishment login ->Member -> Exit -Bulk” .
+ Downloading Active Members List to check the live members’ details
+along with UAN, KYC details through “establishment login -> Dashboard
+-> Active Members details” in Excel format .
+GUIDELINES FOR SEEDING OF MANDATORY e-KYCs
+PREPARATORY WORK BY THE EMPLOYER
+SEEDING OF MANDATORY e-KYCs16
+ACTIVATION OF UAN: [BOTH EMPLOYER & MEMBER]
+ If the member’s mobile number reflected against his UAN in Active
+Members List, it meant that the said UAN is already
+activated/registered .
+ If not, the member’s mobile number should be activated through
+“Member e-Sewa -> Important Links -> Activate UAN” . *Required data
+for activation : UAN, Name & Date of Birth as per active members list,
+own mobile number, email id (optional)]
+ After activation of UAN, member will get the password and the same
+will be reset in “Member e- Sewa” login as desired by the member .
+ In case the password is forgotten, the member has to use “Forget
+Password” option in “Member e-Sewa” .
+ Member has to click option “YES” to get the password to the registered
+mobile number .
+ In case the registered mobile number is not in use/misplaced, the
+member has to click “NO” to get the password to the new mobile
+number subject to the following conditions :
+ If the KYCs Aadhaar & PAN had already seeded, password may be
+obtained through new mobile number .
+ If not, the member has to seed the Aadhaar or PAN through their
+employers as mentioned below .
+ Verify member’s Aadhaar Card having Date of Birth in full form i.e.,
+DD/MM/YYYY . If not in full form, download e-Aadhaar card from UIDAI
+portal or obtain fresh e-Aadhaar card from Aadhaar enrolment centers
+(or) e-Sewa centers .
+ Compare member’s name, Date of birth & Gender with Aadhaar Card and
+Active Member details .
+ In case of any mismatch in Name, Date of Birth and Gender, the member
+can apply correction request through ONLINE :
+ Member can furnish the required details through “Member e-Sewa login -
+> Manage -> Modify Basic Details” for correcting the same .
+ In case Date of Birth mismatch is more than 1 year, please upload
+anyone of the following mandatory proof for his correct date of birth i.e.,
+Birth Certificate, School leaving certificate, 10th Mark Sheet, Passport,
+Service Certificates issued by the Govt .
+ Employer can approve the same thro “Establishment login -> member ->
+Bulk Process modify basic details request” with Digital Signature
+(DSC)/e -sign . On approval, the same will be automatically forwarded to
+concerned Field (EPFO) office .
+ After approval made by the field office, the Members’ Aadhaar will be
+automatically seeded with their UAN After correction made by Field
+Office
+GUIDELINES FOR SEEDING OF MANDATORY e-KYCs
+SEEDING OF AADHAAR WITH UAN: [BOTH EMPLOYER & MEMBER]
+SEEDING OF MANDATORY e-KYCs17
+ The member can seed the Aadhaar through ONLINE using
+“www .epfindia .gov .in -> online services -> eKYC Portal” .
+ (For this processing, OTP will be sent to the registered mobile number in
+Aadhaar)
+ The member can seed the KYCs Aadhaar & Bank through “Member e-Sewa -
+> Manage - > KYC -> Add KYC -> Aadhaar & Bank -> SAVE” and the same
+may be approved by the employer through “establishment login -> member -
+> Approve KYC seeded by member - > Approve with DSC/e -sign” .
+KYCs Uploading : (By Member)
+GUIDELINES FOR SEEDING OF MANDATORY e-KYCs
+SEEDING OF MANDATORY e-KYCs18
+The employer has to enter the KYCs data through :
+Establishment login -> member ->member profile -> search UAN -> KYC
+-> Add KYC -> Aadhaar & Bank -> SAVE” and approve the same through
+“Member -> Approve KYC seeded by member -> Approve with DSC/e -
+sign” .
+Pending KYCs for approval/Member basic details for approve & reject
+functionality / approval of KYC seeded at the time of member
+registration are shown in establishment login -> HOME PAGE as
+ALERT’S .
+After completion of the KYCs seeding, the same will be reflected in
+Member e-Sewa portal and the employer can also view the same in
+Active member list .
+KYCs Uploading/Approving : (By Employer)
+WAYS TO CONNECT WITH EPFO
+UMANG Mobile app, 
+Helpdesk: 1800118005
+www.epfindia.gov.in
+Dedicated portals 
+www.epfigms.gov.in,
+www.pgportal.gov.in
+Social media handles: 
+Twitter at @socialepfo 
+Facebook at /socialepfo
+Facilitation centers at the 
+field offices are the 
+service of all stakeholders
+CONNECT WITH EPFO
+CONNECT WITH EPFO19
+Dedicated 
+revamped 
+grievance portal 
+EPFiGMS for 
+handling 
+grievances 
+digitally
+Regular holding of 
+Webinars by field 
+offices for awareness 
+generation and 
+solving grievances of 
+employers, 
+employees and 
+pensioners.
+WhatsApp based 
+helpline cum 
+grievance redressal 
+mechanism where 
+subscribers, 
+employers and 
+pensioners can file 
+grievances or seek 
+guidance on any 
+issue 
+Technical issues about 
+Member Interface-
+memberfeedback@epfindi
+a.gov.in
+Technical issues about 
+Member Interface-
+memberfeedback@epfindi
+a.gov.in
+RESPONSIBILITY CENTERS
+RESPONSIBILITY CENTERS
+www.epfindia.gov.in
+@socialepfo
+/socialepfo
+The responsibility centers in these offices reach out to the 
+clients and ensure extension of the Social Security services
+PANDIT DEENDAYAL UPADHYAYA NATIONAL ACADEMY OF SOCIAL SECURITY
+Employees’ Provident Fund Organization
+Ministry of Labour & Employment
+Government of India New Delhi
+EPFO has a nationwide presence
+21 ZONAL 
+OFFICES
+138 REGIONAL 
+OFFICES
+117 DISTRICT 
+OFFICES
+पंडित दीनदयाल उपाध्याय राष्ट्रीय सामाजिक सुरक्षा अकादमी
+कममचारी भविष्ट्य ननधि संगठन
+श्रम एंि रोिगार मंत्रालय
+भारत सरकार नई ददल्ली
+1st November 2022

@@ -1,0 +1,15 @@
+name: Deploy PayNexus
+
+# Placeholder — wire up once Azure App Service (backend) and Static Web Apps
+# (frontend) resources exist. See PROJECT_CONTEXT.md §13 Phase 6.
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: TODO
+        run: echo "Add backend (Azure App Service) and frontend (Static Web Apps) deploy steps"

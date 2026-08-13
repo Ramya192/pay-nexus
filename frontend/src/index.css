@@ -1,0 +1,7 @@
+@import "tailwindcss";
+
+/* Tailwind v4 is CSS-first — extend the theme here instead of tailwind.config.js.
+   See https://tailwindcss.com/docs/theme for the @theme directive. */
+@theme {
+  --font-sans: "Segoe UI", system-ui, sans-serif;
+}

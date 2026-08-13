@@ -1,0 +1,39 @@
+# PayNexus backend — pinned loosely by major version; tighten before deploy.
+#
+# langgraph and openai are pinned tighter than the rest below: the original
+# >=0.2 / >=1.40 bounds silently resolved to langgraph 1.2.11 and openai
+# 2.54.0 on a clean install (0.x→1.x and 1.x→2.x major jumps neither pin
+# would have blocked). Both were verified working at those versions
+# end-to-end this session — the tighter bound just stops the *next* major
+# jump from happening silently too.
+
+fastapi>=0.115
+uvicorn[standard]>=0.30
+langgraph>=1.2,<2.0          # verified on 1.2.11
+langchain>=0.3
+langchain-community>=0.3
+langchain-postgres>=0.0.9   # PGVector store wrapper
+langchain-openai>=0.2        # OpenAIEmbeddings
+langchain-text-splitters>=0.3
+pypdf>=4.2                   # PDF loading for rag_documents/
+openai>=2.0,<3.0             # verified on 2.54.0
+pgvector>=0.3.6             # vector column type + SQLAlchemy/psycopg integration
+cryptography>=43.0
+sqlalchemy>=2.0
+alembic>=1.13                # migrations — see backend/alembic/
+psycopg2-binary>=2.9
+python-jose[cryptography]>=3.3
+python-dotenv>=1.0
+pydantic>=2.8
+pydantic[email]>=2.8          # EmailStr validation on auth request schemas
+bcrypt>=4.0                   # login password hashing (security/auth.py calls it directly, not via passlib)
+
+# Local SLM path (USE_LOCAL_SLM=True) — talks to a locally running Ollama server
+# via langchain-ollama, not a Python dependency of Ollama itself.
+# requires: https://ollama.com with `ollama pull phi4-mini`
+langchain-ollama>=0.2
+
+# Vector store note: the FAISS index lives inside PostgreSQL now (pgvector
+# extension on the same DATABASE_URL) — no separate Azure Blob persistence
+# step, no separate vector DB service. Enable once per database:
+#   CREATE EXTENSION IF NOT EXISTS vector;
