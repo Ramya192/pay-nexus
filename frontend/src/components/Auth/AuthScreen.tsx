@@ -1,8 +1,11 @@
 import { useState, type ChangeEvent, type FormEvent } from "react";
 import { login, register } from "../../api/auth";
-import { fetchHistory } from "../../api/payslip";
+import { fetchFinancialProfile } from "../../api/financialProfile";
+import { fetchHistory, fetchSnapshots } from "../../api/payslip";
 import { decryptJSON, deriveEncryptionKey } from "../../crypto/clientEncryption";
 import { useAuthStore } from "../../store/authStore";
+import { useFinancialProfileStore, type FinancialProfile } from "../../store/financialProfileStore";
+import { usePayslipHistoryStore, type SnapshotEntry } from "../../store/payslipHistoryStore";
 import { useSessionHistoryStore } from "../../store/sessionHistoryStore";
 
 export function AuthScreen() {
@@ -13,6 +16,8 @@ export function AuthScreen() {
   const [loading, setLoading] = useState(false);
   const setAuth = useAuthStore((s) => s.setAuth);
   const setHistory = useSessionHistoryStore((s) => s.setHistory);
+  const setFinancialProfile = useFinancialProfileStore((s) => s.setProfile);
+  const setEntries = usePayslipHistoryStore((s) => s.setEntries);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -48,6 +53,43 @@ export function AuthScreen() {
         // without cross-session pattern data for this login.
         console.warn("Could not load session history", historyErr);
       }
+
+      // Same pattern for the financial profile — null just means none
+      // saved yet (fetchFinancialProfile already treats 404 as that, not
+      // an error), which is the normal state for a fresh registration.
+      try {
+        const row = await fetchFinancialProfile();
+        if (row) {
+          const profile = await decryptJSON<FinancialProfile>(aesKey, {
+            ciphertextB64: row.ciphertext_b64,
+            ivB64: row.iv_b64,
+          });
+          setFinancialProfile(profile);
+        }
+      } catch (profileErr) {
+        console.warn("Could not load financial profile", profileErr);
+      }
+
+      // Same row-by-row resilience as session history — one bad snapshot
+      // shouldn't block login or drop every other month on file.
+      try {
+        const rows = await fetchSnapshots();
+        const decrypted: SnapshotEntry[] = [];
+        for (const row of rows) {
+          try {
+            const data = await decryptJSON<Record<string, unknown>>(aesKey, {
+              ciphertextB64: row.ciphertext_b64,
+              ivB64: row.iv_b64,
+            });
+            decrypted.push({ id: row.id, createdAt: row.created_at, data });
+          } catch (rowErr) {
+            console.warn("Skipping undecryptable payslip snapshot", row.id, rowErr);
+          }
+        }
+        setEntries(decrypted);
+      } catch (snapshotsErr) {
+        console.warn("Could not load payslip snapshots", snapshotsErr);
+      }
     } catch {
       setError(
         mode === "login" ? "Incorrect email or password." : "Could not create that account."
@@ -77,7 +119,7 @@ export function AuthScreen() {
             required
             value={email}
             onChange={(e: ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
-            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
           />
         </div>
         <div className="space-y-1">
@@ -91,21 +133,21 @@ export function AuthScreen() {
             minLength={8}
             value={password}
             onChange={(e: ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)}
-            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
           />
         </div>
         {error && <p className="text-sm text-red-600">{error}</p>}
         <button
           type="submit"
           disabled={loading}
-          className="w-full rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+          className="w-full rounded-md bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
         >
           {loading ? "…" : mode === "login" ? "Log in" : "Create account"}
         </button>
         <button
           type="button"
           onClick={() => setMode(mode === "login" ? "register" : "login")}
-          className="w-full text-center text-sm text-indigo-600 hover:underline"
+          className="w-full text-center text-sm text-brand-600 hover:underline"
         >
           {mode === "login" ? "Need an account? Register" : "Have an account? Log in"}
         </button>

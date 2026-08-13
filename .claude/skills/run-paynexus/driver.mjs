@@ -27,11 +27,36 @@ const shot = async (page, name) => {
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 
+// GET /financial-profile intentionally 404s for a fresh account with no
+// saved profile yet (api/routes/financial_profile.py, api/financialProfile.ts
+// both treat this as the real "empty" signal, not an error) — but every
+// run here registers a brand-new user, so it 404s on EVERY single run, and
+// the browser logs its own "Failed to load resource: ... 404" line to the
+// console regardless of the app already handling the response gracefully.
+// Found as a real, pre-existing false-positive: this script has reported
+// FAIL on every run since it was first written, for an endpoint behaving
+// exactly as designed — filtered out here by name, not by blanket-ignoring
+// all console errors, so an actually broken resource still fails the run.
+const EXPECTED_404_PATHS = ["/financial-profile"];
+
 const consoleErrors = [];
 page.on("console", (msg) => {
-  if (msg.type() === "error") consoleErrors.push(msg.text());
+  if (msg.type() !== "error") return;
+  // The browser logs this generic line (no URL attached — it's on the
+  // Response object, not the console message) for ANY non-2xx XHR/fetch,
+  // even ones the app already handles correctly. The response listener
+  // below is the precise, URL-aware check for real HTTP failures; this
+  // generic duplicate would otherwise fail every run regardless of which
+  // endpoint it came from.
+  if (/^Failed to load resource: the server responded with a status of \d+/.test(msg.text())) return;
+  consoleErrors.push(msg.text());
 });
 page.on("pageerror", (err) => consoleErrors.push("pageerror: " + err.message));
+page.on("response", (res) => {
+  if (res.status() < 400) return;
+  if (res.status() === 404 && EXPECTED_404_PATHS.some((p) => res.url().includes(p))) return;
+  consoleErrors.push(`HTTP ${res.status()}: ${res.url()}`);
+});
 
 // Payslip fields keyed by their <label> text — see
 // frontend/src/components/PayslipUploader/ManualEntryForm.tsx's FIELDS
@@ -58,7 +83,10 @@ try {
   // AuthScreen defaults to "login" mode — switch to register first.
   await page.click('button:has-text("Need an account? Register")');
   await page.click('button:has-text("Create account")');
-  await page.waitForSelector("text=Your payslip", { timeout: 15000 });
+  // "Upload payslip" is the TabbedPanel's default-active tab (see
+  // frontend/src/components/Dashboard/TabbedPanel.tsx) — replaced the old
+  // sidebar's "Your payslip" <h2> when the sidebar became tabs.
+  await page.waitForSelector("text=Upload payslip PDF", { timeout: 15000 });
   await shot(page, "02-post-register-main-app");
 
   console.log("--- enter payslip ---");

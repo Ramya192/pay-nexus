@@ -11,6 +11,8 @@ question:
 
 | Checking... | Use |
 |---|---|
+| Pure computation/prompt-construction logic (tax math, trends, dedup, metrics) | **`pytest`** — `cd backend && pytest` (97 unit tests, zero setup; add `-m integration` or just have a real `OPENAI_API_KEY` in `.env` to include 4 more real-LLM-call tests) |
+| An agent's actual narrated ANSWER quality (not just its numbers) | **`python -m agent_eval.eval`** — real OpenAI calls, run manually |
 | One agent's prompt/logic in isolation | **Direct Python invocation** — fastest, no servers needed |
 | The API contract (auth, streaming, persistence) | **`curl` against `uvicorn`** |
 | The actual UI a user sees | **Playwright driver** (`driver.mjs`) |
@@ -112,11 +114,16 @@ node driver.mjs
 Requires both dev servers already running (this drives the browser, it doesn't launch the app).
 Registers a fresh test user each run — no state to reset between runs. Screenshots land in
 `.claude/skills/run-paynexus/shots/` (`01-landing.png` → `04-final-response.png`, or `99-error-state.png`
-on failure). Prints `PASS`/`FAIL` based on whether any browser console errors were seen, plus the raw
-error text if so. Override the target with `FRONTEND_URL=... node driver.mjs`.
+on failure). Prints `PASS`/`FAIL` based on whether any browser console errors were seen (minus one
+known-expected 404 — see Gotchas), plus the raw error text if so. Override the target with
+`FRONTEND_URL=... node driver.mjs`.
 
-The flow it drives: register → switch off the checked-in default (login) mode → enter a payslip →
-ask a question → wait for the response to actually finish (not for the agent indicator — see Gotchas).
+The flow it drives: register → switch off the checked-in default (login) mode → enter a payslip on the
+default-active "Upload payslip" tab (`components/Dashboard/TabbedPanel.tsx` — the old sidebar's three
+stacked sections became three tabs; "Payslip history" and "Investments & loans" are the other two, not
+visited by this flow) → ask a question in the chat popup (`components/ChatWidget/ChatWidget.tsx` —
+floats over the tab content, defaults open, so no extra click needed to reach it) → wait for the response
+to actually finish (not for the agent indicator — see Gotchas).
 
 ## Run (human path)
 
@@ -138,10 +145,43 @@ opens a real browser window — but that's the manual-testing path.
   The latter doesn't fire React's `onChange`, so the app's state never updates even though the DOM looks
   filled.
 - **Payslip Reasoning Agent (Agent 1) returns structured JSON**
-  (`{"explanation": ..., "component_breakdown": ..., "follow_up_suggestions": [...]}`), not plain text.
-  `agents/orchestrator.py`'s `assembler_node` formats this into prose before it reaches the frontend —
-  if you ever see a raw `{"explanation":...}` blob in the chat UI, that formatting step broke (it did,
-  once, during initial build — see git history on `_format_agent_response`).
+  (`{"explanation": ..., "tables": [...], "follow_up_suggestions": [...]}`) — `"tables"` is an array of
+  precomputed-table *keys* the agent is choosing to show (see `agents/tables.py`), not raw data; the
+  real numbers live in Python (`tax_calculations.py`, `payslip_trends.py`, `tax_slabs.py`) and never pass
+  through the model. `agents/orchestrator.py`'s `assembler_node` formats `explanation` into prose and
+  resolves the `tables` keys before either reaches the frontend — if you ever see a raw `{"explanation":
+  ...}` blob in the chat UI, that formatting step broke.
+- **Nudge/Payslip/Regulatory agents each also return their own `token_usage`/`*_llm_calls` and
+  `*_tables` state keys** — exact per-call cost (`agents/llm_metrics.py`, from OpenAI's own
+  `response.usage`, never estimated) and precomputed tables, aggregated by the assembler. Deliberately
+  separate keys per node rather than one shared list — LangGraph's parallel fan-out merges partial
+  state dicts by key, and multiple nodes appending to one shared list in the same super-step is a race,
+  not a merge.
+- **`rag/eval.py`, `compression/eval.py`, and `agent_eval/eval.py` are the dev-facing measurement
+  tools** — `python -m rag.eval` (retrieval hit-rate@k, MRR, generation fact-coverage against a
+  hand-verified ground-truth set in `rag/eval_dataset.py`), `python -m compression.eval` (real
+  before/after token/cost savings against a fabricated test profile), and `python -m agent_eval.eval`
+  (keyword coverage + forbidden-phrase checks against the Payslip/Nudge agents' actual narrated answers —
+  the answer-quality counterpart to `rag/eval.py`, covering the other two reasoning agents). Re-run all
+  three after touching `rag_documents/`, the retriever, any agent's prompt, or
+  `compression/context_compressor.py` — each has already caught a real bug on a "should be a formality"
+  run, not just passed cleanly.
+- **`driver.mjs`'s PASS/FAIL was a false-negative machine for its entire existence until this was
+  found and fixed**: `GET /financial-profile` correctly 404s for a fresh account with no saved profile
+  (`api/routes/financial_profile.py`, already handled gracefully by `api/financialProfile.ts` — this is
+  the real "empty" signal, not an error), but the driver registers a brand-new user on literally every
+  run, so it 404s every single time, and the browser logs its own generic "Failed to load resource: ...
+  404" line to the console regardless of the app handling it correctly. The old blanket
+  "any console error = FAIL" check meant this script had likely never printed a clean `PASS` since it was
+  first written — found by actually running it, not by reading the code. Fixed by filtering that one
+  generic browser message (it carries no URL, so it can't be checked more precisely) and by name-checking
+  the response listener's 404s against `EXPECTED_404_PATHS`. If you add a new intentionally-404ing
+  endpoint, add it to that list rather than loosening the filter further.
+- **A UI restructuring (sidebar → tabs, chat → floating popup) broke this driver's own wait-selector**
+  (`text=Your payslip`, the old sidebar's `<h2>` — replaced by the "Upload payslip" tab) — caught by
+  actually re-running the driver after the UI change, not assumed safe because "the buttons it clicks
+  didn't move." Lesson generalized: any frontend layout change is a reason to re-run `driver.mjs` before
+  trusting it still passes, even when the change looks unrelated to what it drives.
 - **`passlib` is incompatible with `bcrypt>=4.1`** and will crash every register/login with
   `ValueError: password cannot be longer than 72 bytes` — not a real password-length issue, it's
   `passlib`'s internal backend self-test failing on init. `security/auth.py` calls `bcrypt` directly for

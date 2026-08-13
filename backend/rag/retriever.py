@@ -32,6 +32,17 @@ def retrieve(query: str, k: int = config.RAG_TOP_K) -> list[Document]:
     return _store().similarity_search(query, k=k)
 
 
+def retrieve_with_scores(query: str, k: int = config.RAG_TOP_K) -> list[tuple[Document, float]]:
+    """Same retrieval, but also returns each chunk's distance score — for
+    surfacing to the user what was actually retrieved (agents/
+    regulatory_agent.py's sources table) rather than the retrieval being
+    invisible outside a Python shell. PGVector's default strategy is
+    cosine distance: LOWER is more similar (0 = identical), not a 0-1
+    similarity score — labelled as such wherever this is displayed, so a
+    "0.41" doesn't read as "41% relevant" by mistake."""
+    return _store().similarity_search_with_score(query, k=k)
+
+
 def retrieve_as_context(query: str, k: int = config.RAG_TOP_K) -> str:
     """Retrieve and join chunks into one string, ready for prompt injection.
 

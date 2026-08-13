@@ -1,0 +1,22 @@
+# Without this file, `docker build` (which COPYs the whole build context)
+# would bake backend/.env — real OPENAI_API_KEY and DATABASE_URL secrets —
+# directly into the image's filesystem layers, recoverable by anyone who
+# ever pulls or inspects the image. Found and fixed before this Dockerfile
+# was ever actually built for the first time (see README's Phase 6 note).
+.env
+.env.*
+!.env.example
+
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*_eval_report.json
+
+tests/
+agent_eval_report.json
+compression_eval_report.json
+rag_eval_report.json
+
+.git/
+.gitignore

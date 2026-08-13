@@ -52,6 +52,9 @@ class User(Base):
     session_summaries: Mapped[list["SessionSummary"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    financial_profile: Mapped["FinancialProfile | None"] = relationship(
+        back_populates="user", cascade="all, delete-orphan", uselist=False
+    )
 
 
 class PayslipSnapshot(Base):
@@ -90,3 +93,32 @@ class SessionSummary(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped["User"] = relationship(back_populates="session_summaries")
+
+
+class FinancialProfile(Base):
+    """Encrypted investments/loans/insurance profile — ELSS & other mutual
+    funds, stocks, FDs, RDs, home loan principal+interest, life and health
+    insurance premiums. One row per user, upserted in place (PUT
+    /financial-profile), not a growing log like PayslipSnapshot — a
+    portfolio or a home loan doesn't reset every month the way a payslip
+    does, so there's no "history" dimension worth keeping here. Same
+    ciphertext-only contract as everything else in this file; the plaintext
+    shape (once decrypted client-side) is documented in
+    api/models/financial_profile.py, and tax_calculations.py is what turns
+    it into exact 80C/80D/24(b) gap figures for the Nudge Agent.
+    """
+
+    __tablename__ = "financial_profiles"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id"), unique=True, index=True, nullable=False
+    )
+    ciphertext: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    iv: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    user: Mapped["User"] = relationship(back_populates="financial_profile")

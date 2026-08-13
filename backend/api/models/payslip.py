@@ -20,6 +20,19 @@ class PayslipSnapshotOut(BaseModel):
     created_at: str
 
 
+class PayslipSnapshotFull(BaseModel):
+    """GET /payslip/snapshots — unlike PayslipSnapshotOut (returned from
+    POST /save, just a receipt), this carries the ciphertext back so the
+    client can decrypt every saved month and compute real trends from them
+    (see backend/payslip_trends.py)."""
+
+    id: str
+    month: str
+    ciphertext_b64: str
+    iv_b64: str
+    created_at: str
+
+
 class SessionSummaryOut(BaseModel):
     id: str
     ciphertext_b64: str
@@ -34,3 +47,15 @@ class SessionSummarySaveRequest(BaseModel):
 
     ciphertext_b64: str
     iv_b64: str
+
+
+class PayslipParseRequest(BaseModel):
+    """Body for POST /payslip/parse — text already extracted client-side
+    from an uploaded PDF (frontend/.../PDFParser.tsx). Plaintext; the PDF
+    itself never reaches the server."""
+
+    text: str
+
+
+class PayslipParseResponse(BaseModel):
+    fields: dict

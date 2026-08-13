@@ -1,7 +1,26 @@
 @import "tailwindcss";
 
 /* Tailwind v4 is CSS-first — extend the theme here instead of tailwind.config.js.
-   See https://tailwindcss.com/docs/theme for the @theme directive. */
+   See https://tailwindcss.com/docs/theme for the @theme directive.
+
+   `brand` is PayNexus's own accent — a deep navy/petrol, replacing the raw
+   `indigo-*` Tailwind default every button/link/focus-ring used before this
+   (see README's "UI design audit" and "UI changes, following the design
+   audit" sections). Any `--color-*` token here becomes real utility classes
+   automatically (bg-brand-600, text-brand-700, border-brand-200, ...) — no
+   separate config file needed in v4. Slate stays as the neutral scale
+   (that part of the old palette was fine); only the accent changes. */
 @theme {
   --font-sans: "Segoe UI", system-ui, sans-serif;
+
+  --color-brand-50: #EEF4F6;
+  --color-brand-100: #D8E7EC;
+  --color-brand-200: #B2CEDA;
+  --color-brand-300: #82AEC0;
+  --color-brand-400: #4F86A0;
+  --color-brand-500: #2F6883;
+  --color-brand-600: #1F4B5E;
+  --color-brand-700: #163847;
+  --color-brand-800: #102934;
+  --color-brand-900: #0B1D25;
 }

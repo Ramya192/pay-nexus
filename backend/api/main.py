@@ -15,7 +15,7 @@ Run from backend/: uvicorn api.main:app
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routes import auth, chat, payslip
+from api.routes import auth, chat, financial_profile, payslip
 from config import config
 
 app = FastAPI(title="PayNexus API")
@@ -33,6 +33,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(chat.router)
 app.include_router(payslip.router)
+app.include_router(financial_profile.router)
 
 
 @app.get("/health")

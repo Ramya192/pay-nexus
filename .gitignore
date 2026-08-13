@@ -1,6 +1,10 @@
 .env
 __pycache__/
 *.pyc
+.pytest_cache/
+backend/*_eval_report.json
+.claude/skills/run-paynexus/shots/
+*.zip
 .venv/
 node_modules/
 dist/

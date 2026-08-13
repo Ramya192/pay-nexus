@@ -13,6 +13,7 @@ from collections.abc import Generator
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
+from agents.llm_metrics import summarize as summarize_metrics
 from agents.orchestrator import paynexus_graph
 from api.models.chat import ChatRequest, SummarizeRequest, SummarizeResponse
 from compression.context_compressor import compress_session_summary
@@ -28,7 +29,10 @@ def chat(body: ChatRequest, user: User = Depends(get_current_user)) -> Streaming
     initial_state = {
         "user_query": body.query,
         "payslip_data": body.payslip_data or {},
+        "financial_profile": body.financial_profile or {},
         "session_history": body.session_history or [],
+        "payslip_history": body.payslip_history or [],
+        "conversation": body.conversation or [],
         "user_id": user.id,
     }
     return StreamingResponse(_stream_graph(initial_state), media_type="text/event-stream")
@@ -42,8 +46,10 @@ def summarize(body: SummarizeRequest, _user: User = Depends(get_current_user)) -
     server never holds the AES key. Auth-gated so only a logged-in user can
     burn an OpenAI call here, but the summary itself isn't tied to their
     stored data — it's computed fresh from what the client sends."""
-    summary = compress_session_summary(body.exchanges, body.payslip_data or {})
-    return SummarizeResponse(summary=summary)
+    summary, metrics = compress_session_summary(body.exchanges, body.payslip_data or {})
+    return SummarizeResponse(
+        summary=summary, token_usage=summarize_metrics([metrics] if metrics else [])
+    )
 
 
 def _stream_graph(initial_state: dict) -> Generator[str, None, None]:
@@ -61,6 +67,8 @@ def _stream_graph(initial_state: dict) -> Generator[str, None, None]:
                             "response": node_update.get("final_response", ""),
                             "active_agent": node_update.get("active_agent", ""),
                             "nudge": node_update.get("nudge_card"),
+                            "tables": node_update.get("tables") or [],
+                            "token_usage": node_update.get("token_usage") or {},
                         }
                     )
                 elif node_name != "orchestrator":

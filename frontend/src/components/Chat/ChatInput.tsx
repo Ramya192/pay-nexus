@@ -24,12 +24,12 @@ export function ChatInput({
         onChange={(e: ChangeEvent<HTMLInputElement>) => setValue(e.target.value)}
         placeholder="Why did my take-home drop this month?"
         disabled={disabled}
-        className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+        className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
       />
       <button
         type="submit"
         disabled={disabled}
-        className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+        className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
       >
         Ask
       </button>

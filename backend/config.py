@@ -33,9 +33,13 @@ class Config:
     PGVECTOR_COLLECTION: str = "paynexus_tax_docs"
 
     # --- Cost / context controls ---
-    ENABLE_PROMPT_CACHE: bool = os.getenv("ENABLE_PROMPT_CACHE", "True") == "True"
+    # ENABLE_PROMPT_CACHE and MAX_CONTEXT_TOKENS used to live here too —
+    # removed during a codebase review: neither was ever actually read by
+    # any code (OpenAI's prompt caching is automatic and not something this
+    # app toggles; nothing implemented a token-budget cap keyed to a
+    # config value). Both looked like live settings a reviewer could flip
+    # in .env and see an effect from, but changing either did nothing.
     ENABLE_CONTEXT_COMPRESSION: bool = os.getenv("ENABLE_CONTEXT_COMPRESSION", "True") == "True"
-    MAX_CONTEXT_TOKENS: int = int(os.getenv("MAX_CONTEXT_TOKENS", "2000"))
 
     # --- Database ---
     DATABASE_URL: str = os.getenv("DATABASE_URL", "")

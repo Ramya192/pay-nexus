@@ -18,14 +18,12 @@ langchain-text-splitters>=0.3
 pypdf>=4.2                   # PDF loading for rag_documents/
 openai>=2.0,<3.0             # verified on 2.54.0
 pgvector>=0.3.6             # vector column type + SQLAlchemy/psycopg integration
-cryptography>=43.0
 sqlalchemy>=2.0
 alembic>=1.13                # migrations — see backend/alembic/
 psycopg2-binary>=2.9
-python-jose[cryptography]>=3.3
+python-jose[cryptography]>=3.3   # the [cryptography] extra also covers security/encryption.py's needs — no separate top-level pin needed
 python-dotenv>=1.0
-pydantic>=2.8
-pydantic[email]>=2.8          # EmailStr validation on auth request schemas
+pydantic[email]>=2.8          # EmailStr validation on auth request schemas — [email] extra already includes pydantic itself
 bcrypt>=4.0                   # login password hashing (security/auth.py calls it directly, not via passlib)
 
 # Local SLM path (USE_LOCAL_SLM=True) — talks to a locally running Ollama server
@@ -37,3 +35,6 @@ langchain-ollama>=0.2
 # extension on the same DATABASE_URL) — no separate Azure Blob persistence
 # step, no separate vector DB service. Enable once per database:
 #   CREATE EXTENSION IF NOT EXISTS vector;
+
+# Dev/test only — not needed to run the app itself.
+pytest>=8.0

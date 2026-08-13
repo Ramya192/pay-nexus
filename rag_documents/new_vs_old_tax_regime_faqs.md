@@ -2,6 +2,17 @@
 
 Source: https://www.incometax.gov.in/iec/foportal/help/new-tax-vs-old-tax-regime-faqs (Government of India, Income Tax Department)
 
+**Editorial note (not part of the original source — added because two figures below are now stale):**
+this page's Q5 and Q8 reflect AY 2024-25 figures. Two of them have since been superseded by later
+Budgets and should NOT be quoted as current:
+- Q5's ₹50,000 new-regime standard deduction → raised to **₹75,000** (Budget 2024, effective FY 2024-25
+  onward) — see `budget_2025-26_highlights.txt` for the current figure.
+- Q8's "no tax up to ₹7 lakh" (new regime) → raised to **₹12 lakh** (₹12.75 lakh for salaried, with
+  standard deduction) (Budget 2025, effective FY 2025-26) — see `budget_2025-26_highlights.txt`.
+
+Everything else on this page (regime-switching mechanics, Form 10-IEA, HRA/Chapter-VIA rules) is
+mechanism/procedure, not a Budget-dependent figure, and isn't known to be stale.
+
 ## Overview
 
 The Finance Act 2023 amended Section 115BAC effective AY 2024-25, establishing the new tax regime as the default for individuals, HUF, AOP, and related entities. Taxpayers may opt out to use the old system. For non-business income cases, regime selection occurs annually via ITR before the due date. Those with business/professional income must file Form 10-IEA to opt out of the new regime.

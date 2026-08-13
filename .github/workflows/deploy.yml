@@ -1,15 +1,66 @@
 name: Deploy PayNexus
 
-# Placeholder — wire up once Azure App Service (backend) and Static Web Apps
-# (frontend) resources exist. See PROJECT_CONTEXT.md §13 Phase 6.
+# Two independent jobs, matching how the two halves are actually hosted —
+# backend as a container on Azure App Service (via Docker Hub), frontend as
+# a static build on Azure Static Web Apps. See README.md's deployment
+# section for the real Azure resource names/regions this targets.
 on:
   push:
     branches: [main]
 
 jobs:
-  build:
+  deploy-backend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: TODO
-        run: echo "Add backend (Azure App Service) and frontend (Static Web Apps) deploy steps"
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/paynexus-backend:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/paynexus-backend:${{ github.sha }}
+
+      # No explicit "restart the App Service" step here — Continuous
+      # Deployment is enabled directly on the App Service (a webhook Docker
+      # Hub calls automatically on every push to the `:latest` tag), set up
+      # once via `az webapp deployment container config --enable-cd true`.
+      # Re-run that command if the webhook is ever lost (e.g. the App
+      # Service is recreated).
+
+  deploy-frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm ci
+
+      # Real build here (not the SWA action's own Oryx-based build) so the
+      # exact same `npm run build` this project already verifies locally
+      # runs in CI too — .env.production supplies VITE_API_BASE_URL, Vite
+      # inlines it at build time (see src/api/client.ts's docstring).
+      - run: npm run build
+
+      - name: Deploy to Azure Static Web Apps
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: upload
+          app_location: frontend/dist
+          skip_app_build: true
