@@ -59,7 +59,7 @@ charged).
 | Frontend state | Zustand | Minimal boilerplate for chat/session state |
 | Encryption | Client-side AES-256-GCM (PBKDF2-derived key) | Server never sees plaintext financial data |
 | Vector store | pgvector on the same Postgres instance | One database instead of a separate vector service |
-| LLM provider | OpenAI (GPT-4o / GPT-4o-mini), local Ollama fallback for two agents | Direct API access; Microsoft Foundry evaluated and not adopted (region/cost tradeoffs) |
+| LLM provider | OpenAI (GPT-4o / GPT-4o-mini), local Ollama fallback for two agents | Direct API access, existing paid plan |
 
 ## Testing
 
@@ -113,7 +113,3 @@ cd frontend
 npm install
 npm run dev
 ```
-
-See `.claude/skills/run-paynexus/SKILL.md` for the full agent-facing runbook — direct Python invocation,
-`curl` recipes, and the Playwright driver — with every command actually re-run to confirm it works as
-written.
