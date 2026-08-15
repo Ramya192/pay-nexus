@@ -46,6 +46,10 @@ class TestCompute80C:
         assert gap.used == 35_853
         assert gap.note is None
 
+    def test_ppf_counts_toward_80c(self):
+        gap = compute_80c({"ppf": 60_000, "elssMutualFunds": 40_000})
+        assert gap.used == 100_000
+
     def test_caps_at_limit(self):
         gap = compute_80c({"elssMutualFunds": 200_000})
         assert gap.used == SECTION_80C_LIMIT

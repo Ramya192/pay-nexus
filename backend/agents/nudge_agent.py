@@ -53,6 +53,7 @@ from tax_slabs import (
     compute_new_regime_tax,
     compute_old_regime_tax,
     estimate_annual_gross_income,
+    regime_choice_available,
     tax_liability_table,
 )
 
@@ -211,7 +212,17 @@ def nudge_agent_node(state: PayNexusState) -> dict:
     # so the two agents can never independently reach different regime
     # conclusions in the same multi-agent response (see module docstring).
     annual_income, income_note = estimate_annual_gross_income(payslip_data, payslip_history)
-    if annual_income > 0:
+    if annual_income > 0 and not regime_choice_available(payslip_data.get("month")):
+        # Same historical guard as payslip_agent.py — see
+        # tax_slabs.regime_choice_available's docstring.
+        prompt_parts.append(
+            f"This payslip is from {payslip_data.get('month')} — the new tax regime didn't exist "
+            "yet then (it was introduced in Union Budget 2020, effective FY2020-21/April 2020 "
+            "onward). Only the old regime was available for that period. If asked which regime "
+            "to choose or to compare regimes, say so plainly — there was no choice to make at "
+            "the time — rather than presenting a new-vs-old comparison."
+        )
+    elif annual_income > 0:
         old_result = compute_old_regime_tax(annual_income, total_deductions)
         new_result = compute_new_regime_tax(annual_income)
         prompt_parts.append(
