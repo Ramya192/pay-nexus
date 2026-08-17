@@ -9,8 +9,10 @@ regulation, spending, budgeting, and savings goals in one place.
 **V1** (payslip + tax regulation only, 3 agents) is live: [nice-desert-0837ea310.7.azurestaticapps.net](https://nice-desert-0837ea310.7.azurestaticapps.net)
 · `paynexus-api.azurewebsites.net` (backend API).
 **V2** (this branch, `v2-dev`) adds bank statements, budgeting, savings goals, and scenario
-planning — built, tested, and live-verified end to end, not yet deployed. Deliberately kept off
-`main` (which auto-deploys V1 to production on push) until it's ready to ship as a whole.
+planning — built, tested, and live-verified end to end. Deployed to its own, separate Azure
+resources (own App Service, own Static Web App, own database) rather than merged to `main`, so it
+never touches V1's production traffic: [ambitious-pebble-083cdaf10.7.azurestaticapps.net](https://ambitious-pebble-083cdaf10.7.azurestaticapps.net)
+· `paynexus-api-v2.azurewebsites.net` (backend API).
 
 ## Architecture
 
@@ -53,18 +55,24 @@ alert via `localStorage`.
 
 | Resource | What | Where |
 |---|---|---|
-| `paynexus-api` | FastAPI backend, Docker container (V1 only — V2 not deployed) | Azure App Service (Basic B1, `indiasouthcentral`) |
-| `paynexus-web` | React frontend (V1 only — V2 not deployed) | Azure Static Web Apps (Free tier) |
-| `paynexus-db-ramya` | PostgreSQL 16 + `pgvector`, separate `paynexus` (V1) / `paynexus_v2` databases on the same server | Azure Database for PostgreSQL Flexible Server (Burstable B1MS) |
-| `ramya192/paynexus-backend` | Backend container image | Docker Hub (free tier) |
+| `paynexus-api` | V1 backend, Docker container | Azure App Service (Basic B1, `indiasouthcentral`) |
+| `paynexus-api-v2` | V2 backend, Docker container — **same App Service Plan as V1** (shared B1 compute, no extra plan cost) | Azure App Service (Basic B1, `indiasouthcentral`) |
+| `paynexus-web` | V1 frontend | Azure Static Web Apps (Free tier) |
+| `paynexus-web-v2` | V2 frontend | Azure Static Web Apps (Free tier) |
+| `paynexus-db-ramya` | PostgreSQL 16 + `pgvector`, separate `paynexus` (V1) / `paynexus_v2` (V2) databases on the same server | Azure Database for PostgreSQL Flexible Server (Burstable B1MS) |
+| `ramya192/paynexus-backend` | Backend container image — `:latest`/`:<sha>` tags for V1, `:v2-latest`/`:v2-<sha>` for V2, same repo | Docker Hub (free tier) |
 
-CI/CD: `.github/workflows/deploy.yml` — pushes to `main` build+push the backend image to Docker Hub
-(Azure's Continuous Deployment webhook then re-pulls it automatically) and build+deploy the
-frontend to Static Web Apps. This is why V2's work stays on `v2-dev` until it's ready to ship as a
-whole — merging to `main` early would auto-deploy a partially-verified feature set to the same
-production resources V1 users are on. Real ongoing cost: **~$34/month** (Postgres + App Service;
-Static Web Apps and Docker Hub are free), currently running against a $200 Azure free-trial credit
-with a hard spending limit (no card can be charged).
+CI/CD: two independent workflows, so V1's and V2's deploys can never cross-trigger each other —
+`.github/workflows/deploy.yml` (pushes to `main` → `paynexus-api`/`paynexus-web`) and
+`.github/workflows/deploy-v2.yml` (pushes to `v2-dev` → `paynexus-api-v2`/`paynexus-web-v2`). Each
+backend job builds+pushes its own image tag to Docker Hub; each App Service has its own Continuous
+Deployment webhook that re-pulls automatically on a push to its own tag. This is also why V2 has
+its *own* separate database (`paynexus_v2`) rather than sharing V1's live one — V2's still-evolving
+feature set writing into the same store V1's real users are on would be a real data-integrity risk,
+not just a deploy-pipeline one. Real ongoing cost: **~$34/month** (Postgres + one shared App Service
+Plan; Static Web Apps and Docker Hub are free, and a second App Service on the *same* Basic B1 plan
+doesn't add plan cost, just shares its compute), currently running against a $200 Azure free-trial
+credit with a hard spending limit (no card can be charged).
 
 **Account Aggregator (AA) integration** — automatic bank-statement fetch via Setu/FinVu — was
 built and tested against both providers' real API contracts, then removed entirely rather than

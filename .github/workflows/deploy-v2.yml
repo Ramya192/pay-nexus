@@ -1,0 +1,73 @@
+name: Deploy PayNexus V2
+
+# Deliberately a SEPARATE workflow file from deploy.yml, not a branch
+# condition added to it -- keeps V1's deploy path (main -> paynexus-api /
+# paynexus-web) completely untouched. Triggered by v2-dev specifically so
+# V2's still-evolving feature set never risks V1's production resources.
+# Reuses the repo's existing DOCKERHUB_USERNAME/DOCKERHUB_TOKEN secrets
+# (not branch-scoped, already used by deploy.yml) but a SEPARATE Static
+# Web Apps deployment token (AZURE_STATIC_WEB_APPS_API_TOKEN_V2) since
+# each Static Web App resource has its own unique token. See README.md's
+# Deployment section for the actual Azure resource names this targets.
+on:
+  push:
+    branches: [v2-dev]
+
+jobs:
+  deploy-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/paynexus-backend:v2-latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/paynexus-backend:v2-${{ github.sha }}
+
+      # No explicit "restart the App Service" step -- Continuous Deployment
+      # is enabled directly on paynexus-api-v2 (a webhook Docker Hub calls
+      # automatically on every push to the :v2-latest tag), same pattern
+      # as V1. One manual one-time step: add that webhook URL (Azure
+      # Portal -> paynexus-api-v2 -> Deployment Center -> shows it once
+      # authenticated) to Docker Hub's ramya192/paynexus-backend repo,
+      # scoped to the v2-latest tag. Re-add it if the App Service is ever
+      # recreated.
+
+  deploy-frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm ci
+
+      # .env.production supplies VITE_API_BASE_URL (paynexus-api-v2's own
+      # URL, not V1's) -- Vite inlines it at build time, same pattern as
+      # V1's workflow. Real `npm run build`, not the SWA action's own
+      # Oryx-based build, so exactly what's verified locally runs in CI.
+      - run: npm run build
+
+      - name: Deploy to Azure Static Web Apps
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_V2 }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: upload
+          app_location: frontend/dist
+          skip_app_build: true
