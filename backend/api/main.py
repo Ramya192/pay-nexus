@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.routes import auth, chat, financial_profile, payslip
 from config import config
 
-app = FastAPI(title="PayNexus API")
+app = FastAPI(title="PayNexus API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
