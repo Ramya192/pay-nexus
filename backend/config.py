@@ -59,20 +59,6 @@ class Config:
     WHATIF_AGENT_MODEL: str = "gpt-4o"
     WHATIF_EXTRACTION_MODEL: str = "gpt-4o-mini"
 
-    # --- V2: Account Aggregator (Setu sandbox) ---
-    # Sandbox only — see .env.example's setup note and setu_aa_client.py's
-    # module docstring for the signup flow and verified endpoint paths.
-    # SETU_AA_TOKEN_URL is a separate host from SETU_AA_BASE_URL on purpose —
-    # confirmed against Setu's own docs, not a typo: auth is a shared Setu
-    # platform service (uat.setu.co), the FIU-specific consent/session APIs
-    # live on a different host (fiu-sandbox.setu.co).
-    SETU_AA_TOKEN_URL: str = "https://uat.setu.co/api/v2/auth/token"
-    SETU_AA_BASE_URL: str = os.getenv("SETU_AA_BASE_URL", "https://fiu-sandbox.setu.co")
-    SETU_AA_PRODUCT_INSTANCE_ID: str = os.getenv("SETU_AA_PRODUCT_INSTANCE_ID", "")
-    SETU_AA_CLIENT_ID: str = os.getenv("SETU_AA_CLIENT_ID", "")
-    SETU_AA_CLIENT_SECRET: str = os.getenv("SETU_AA_CLIENT_SECRET", "")
-    SETU_AA_REDIRECT_URL: str = os.getenv("SETU_AA_REDIRECT_URL", "")
-
     # --- RAG ---
     # Vectors live in Postgres via pgvector on DATABASE_URL below — no separate
     # vector DB service, no index file to persist to blob storage.

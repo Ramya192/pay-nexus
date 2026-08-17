@@ -11,7 +11,6 @@ import { useAuthStore } from "../../store/authStore";
 import { useTransactionStore, type StatementEntry } from "../../store/transactionStore";
 import { computeContentHash } from "../../utils/contentHash";
 import { extractPdfText } from "../../utils/pdfText";
-import { LinkBankViaAA } from "./LinkBankViaAA";
 
 type Status = "idle" | "reading" | "parsing" | "review" | "saving" | "saved" | "error";
 
@@ -132,15 +131,6 @@ export function StatementUploader() {
     }
   }
 
-  function handleAAFetched(transactions: ParsedTransaction[], accountLabel: string, aaWarnings: string[]) {
-    setSourceAccount(accountLabel);
-    setError(null);
-    setWarnings(aaWarnings);
-    setParsed(transactions);
-    setPeriodLabel(defaultPeriodLabel(transactions));
-    setStatus("review");
-  }
-
   const busy = status === "reading" || status === "parsing" || status === "saving";
 
   return (
@@ -179,8 +169,6 @@ export function StatementUploader() {
         {status === "parsing" && <p className="text-xs text-slate-500">Extracting and categorizing transactions…</p>}
         {error && <p className="text-xs text-red-600">{error}</p>}
       </div>
-
-      <LinkBankViaAA onFetched={handleAAFetched} />
 
       {parsed && (
         <div className="space-y-2 rounded-md border border-slate-200 p-3">

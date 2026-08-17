@@ -1,7 +1,7 @@
 """add content_hash to bank_statements
 
 Revision ID: f1a2b3c4d5e6
-Revises: e8f3c7a1b9d2
+Revises: d4a6f0e2b8c1
 Create Date: 2026-08-16 09:00:00.000000
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'f1a2b3c4d5e6'
-down_revision: Union[str, Sequence[str], None] = 'e8f3c7a1b9d2'
+down_revision: Union[str, Sequence[str], None] = 'd4a6f0e2b8c1'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

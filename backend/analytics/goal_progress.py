@@ -20,6 +20,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 
+# TODO: for market-linked goals (stocks, FDs, mutual funds), progress here
+# is savings-contribution math only -- it doesn't account for investment
+# returns/appreciation between now and target_date. No live price-lookup
+# source is wired into this codebase yet; wire one in (and feed a
+# return-rate assumption into compute_goal_progress) before claiming this
+# module projects anything beyond "money physically saved so far."
+
 
 @dataclass
 class GoalProgress:

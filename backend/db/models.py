@@ -24,13 +24,6 @@ budgets              ciphertext only — PUT /budget (BudgetPlanner, V2). One
                      as financial_profiles, not a growing log; a budget is a
                      standing target that gets edited, not a new one every
                      period.
-aa_consents          PLAINTEXT — POST /aa/consent (Account Aggregator
-                     integration, V2). The one table in this file that
-                     isn't ciphertext, deliberately: a Setu consent id and
-                     its status aren't financial figures, same reasoning
-                     bank_statements' source_account/period_label already
-                     gets to stay plaintext. Growing-log, one row per
-                     consent request.
 
 Password hashing (login) and AES key derivation (payslip encryption) are
 deliberately separate concerns: `hashed_password` authenticates the user;
@@ -83,9 +76,6 @@ class User(Base):
     goals: Mapped[list["Goal"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     budget: Mapped["Budget | None"] = relationship(
         back_populates="user", cascade="all, delete-orphan", uselist=False
-    )
-    aa_consents: Mapped[list["AAConsent"]] = relationship(
-        back_populates="user", cascade="all, delete-orphan"
     )
 
 
@@ -267,35 +257,3 @@ class Budget(Base):
     )
 
     user: Mapped["User"] = relationship(back_populates="budget")
-
-
-class AAConsent(Base):
-    """One Account Aggregator consent request (Setu sandbox, V2) — the
-    ONLY plaintext table in this file; see this module's docstring for why
-    a consent id/status isn't financial data the way everything else here
-    is. `id` is Setu's own consent id (not a locally-generated UUID) so a
-    webhook notification keyed by consent id can look the row up directly.
-    `vua` (the mobile number + AA handle consent was requested for) is
-    kept for reference/debugging, not because it's sensitive at this tier.
-
-    Never holds actual account data — status only (PENDING/ACTIVE/REJECTED/
-    REVOKED/EXPIRED, per Setu's CONSENT_STATUS_UPDATE notification shape).
-    The real financial data a completed consent unlocks flows through
-    POST /aa/fetch -> aa_transaction_mapping.py -> the same
-    models.Transaction shape and POST /statement/save ciphertext contract
-    as every other ingestion path — never persisted in this table.
-    """
-
-    __tablename__ = "aa_consents"
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)  # Setu's own consent id
-    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True, nullable=False)
-    vua: Mapped[str] = mapped_column(String(100), nullable=False)
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="PENDING")
-
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
-    )
-
-    user: Mapped["User"] = relationship(back_populates="aa_consents")
