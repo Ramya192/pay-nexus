@@ -53,6 +53,32 @@ class TestRowsToTransactions:
     def test_empty_rows_returns_empty(self):
         assert rows_to_transactions([], "HDFC Checking") == ([], [])
 
+    def test_identical_duplicate_rows_get_distinct_ids(self):
+        # Two genuinely separate transactions that happen to share date,
+        # description, amount, and account (e.g. two same-day ₹500 Netflix
+        # charges) must not collide onto one transaction_id — that would
+        # make StatementList.tsx's handleCategoryChange() silently apply a
+        # category correction meant for one row to both.
+        rows = [
+            {"Date": "2026-07-10", "Description": "NETFLIX", "Amount": "-500"},
+            {"Date": "2026-07-10", "Description": "NETFLIX", "Amount": "-500"},
+        ]
+        transactions, skipped = rows_to_transactions(rows, "HDFC Checking")
+        assert skipped == []
+        assert len(transactions) == 2
+        assert transactions[0].transaction_id != transactions[1].transaction_id
+
+    def test_identical_duplicate_rows_still_deterministic_across_reparse(self):
+        # Re-uploading the exact same file must reproduce the exact same
+        # set of IDs, not fresh random ones each time.
+        rows = [
+            {"Date": "2026-07-10", "Description": "NETFLIX", "Amount": "-500"},
+            {"Date": "2026-07-10", "Description": "NETFLIX", "Amount": "-500"},
+        ]
+        first, _ = rows_to_transactions(rows, "HDFC Checking")
+        second, _ = rows_to_transactions(rows, "HDFC Checking")
+        assert [t.transaction_id for t in first] == [t.transaction_id for t in second]
+
 
 class TestParseCsvText:
     def test_parses_csv_text_end_to_end(self):

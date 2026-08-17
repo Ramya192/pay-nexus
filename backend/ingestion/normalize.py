@@ -85,6 +85,11 @@ def rows_to_transactions(rows: list[dict], source_account: str) -> tuple[list[Tr
 
     transactions: list[Transaction] = []
     skipped: list[dict] = []
+    # Counts prior rows with identical (date, description, amount,
+    # source_account) seen so far, so make_transaction_id can disambiguate
+    # genuinely-duplicate rows (e.g. two same-day, same-amount Netflix
+    # charges) instead of silently colliding onto one ID — see its docstring.
+    seen_counts: dict[str, int] = {}
 
     for row in rows:
         txn_date = _parse_date(row.get(date_col))
@@ -101,9 +106,13 @@ def rows_to_transactions(rows: list[dict], source_account: str) -> tuple[list[Tr
             skipped.append(row)
             continue
 
+        dedup_key = f"{txn_date.isoformat()}|{description.strip().lower()}|{amount:.2f}|{source_account}"
+        occurrence = seen_counts.get(dedup_key, 0)
+        seen_counts[dedup_key] = occurrence + 1
+
         transactions.append(
             Transaction(
-                transaction_id=make_transaction_id(txn_date, description, amount, source_account),
+                transaction_id=make_transaction_id(txn_date, description, amount, source_account, occurrence),
                 date=txn_date,
                 description=description,
                 amount=amount,

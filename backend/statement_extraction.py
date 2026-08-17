@@ -60,6 +60,10 @@ def extract_transactions_from_text(text: str, source_account: str) -> tuple[list
         rows = []
 
     transactions: list[Transaction] = []
+    # See ingestion/normalize.py's identical pattern — disambiguates
+    # genuinely-duplicate rows within the same statement so they don't
+    # collide onto one transaction_id.
+    seen_counts: dict[str, int] = {}
     for row in rows:
         if not isinstance(row, dict):
             continue
@@ -71,9 +75,12 @@ def extract_transactions_from_text(text: str, source_account: str) -> tuple[list
             continue
         if not description:
             continue
+        dedup_key = f"{txn_date.isoformat()}|{description.strip().lower()}|{amount:.2f}|{source_account}"
+        occurrence = seen_counts.get(dedup_key, 0)
+        seen_counts[dedup_key] = occurrence + 1
         transactions.append(
             Transaction(
-                transaction_id=make_transaction_id(txn_date, description, amount, source_account),
+                transaction_id=make_transaction_id(txn_date, description, amount, source_account, occurrence),
                 date=txn_date,
                 description=description,
                 amount=amount,

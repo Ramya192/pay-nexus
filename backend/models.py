@@ -35,11 +35,23 @@ class Transaction(BaseModel):
     category_source: str | None = None
 
 
-def make_transaction_id(date_: date, description: str, amount: float, source_account: str) -> str:
+def make_transaction_id(
+    date_: date, description: str, amount: float, source_account: str, occurrence: int = 0
+) -> str:
     """Deterministic ID from the transaction's own fields, so re-parsing or
     re-uploading the same statement twice produces the same IDs instead of
     duplicates — mirrors PayslipSnapshot's month-based dedup (api/routes/
     payslip.py), just content-hashed instead of a single plaintext field
-    since a statement has many rows, not one per upload."""
-    raw = f"{date_.isoformat()}|{description.strip().lower()}|{amount:.2f}|{source_account}"
+    since a statement has many rows, not one per upload.
+
+    `occurrence` disambiguates two genuinely-identical rows (same date,
+    description, amount, and account — e.g. two separate ₹500 Netflix
+    charges on the same day) landing in the same parse batch. Callers pass
+    the 0-based count of prior rows with the same other four fields seen so
+    far while walking the statement in order, so re-uploading the identical
+    file still reproduces the identical set of IDs (parse order is stable),
+    while two distinct-but-identical-looking rows no longer collide onto one
+    ID. Left at its default of 0 for any caller that only has one row to
+    hash (e.g. a direct unit-test call) — behaves exactly as before then."""
+    raw = f"{date_.isoformat()}|{description.strip().lower()}|{amount:.2f}|{source_account}|{occurrence}"
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
