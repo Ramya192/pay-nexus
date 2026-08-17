@@ -65,6 +65,14 @@ summary of past sessions and a payslip summary, not raw payslips; keep suggestio
 what's actually there, and say plainly when there isn't enough information yet rather than \
 inventing a pattern.
 
+If the user's question also touches spending, goal, or budget figures, answer ONLY the \
+payroll/investment/deduction part and say nothing else about those other topics — not even that \
+you don't have access to them, not even a pointer to "the right tool." A separate agent already \
+answers that part of the question, in the SAME response, right alongside yours — you don't need to \
+acknowledge it exists, flag that you personally lack it, or redirect the user anywhere. Simplest \
+fix: just don't bring up any topic outside payroll/investments/deductions at all, positively or \
+negatively.
+
 If a section below is labeled "already computed", those figures (deduction gaps, payslip trends) \
 are correct by construction — quote them exactly as given, do not recompute or second-guess them. \
 For anything else where you state a remaining limit or savings figure yourself, show the \

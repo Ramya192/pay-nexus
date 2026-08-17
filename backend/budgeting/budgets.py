@@ -166,7 +166,17 @@ def format_budget_summary_for_prompt(transactions: list[dict], budgets: dict[str
         lines.append(f"  {category}: ₹{spent:,.0f} spent of ₹{budget:,.0f} budgeted ({status})")
 
     if alerts:
-        lines.append(f"{len(alerts)} categor{'y is' if len(alerts) == 1 else 'ies are'} over budget this period, worst first:")
+        # "worst" = highest RUPEE overage, not highest percentage -- called
+        # out explicitly because those two orderings can disagree (a small
+        # budget can be blown by a huge %, while a big budget's modest %
+        # overage is still more rupees) and leaving it ambiguous produced a
+        # real observed narration bug: "...highest overspend at 137%...
+        # followed by...146%" -- correct % figures, but phrased as if
+        # ordered by %, so it read as contradicting itself.
+        lines.append(
+            f"{len(alerts)} categor{'y is' if len(alerts) == 1 else 'ies are'} over budget this period, "
+            f"ordered by RUPEE amount over (not percentage) — biggest ₹ overage first:"
+        )
         for a in alerts:
             lines.append(
                 f"  {a['category']}: {a['over_pct']:.0f}% over — ₹{a['spent']:,.0f} spent vs ₹{a['budget']:,.0f} "
