@@ -1,18 +1,18 @@
 import { Maximize2, Minimize2, Minus, MessageCircle } from "lucide-react";
-import { useState } from "react";
 import { ChatInterface } from "../Chat/ChatInterface";
+import { useChatWidgetUiStore } from "../../store/chatWidgetUiStore";
 
 /**
  * Floating popup, per user request — replaces the always-visible main-panel
  * chat with a launcher button + panel, minimizable back to the button.
- * Defaults OPEN on load (below), not closed: unlike a typical support-chat
- * widget, chat is PayNexus's actual core feature, not a secondary channel —
- * defaulting it closed would make a first-time user's main way of asking a
- * question invisible until they noticed the button. Conversation state
- * (chatStore) is independent of whether this panel is mounted, so
- * minimizing mid-answer doesn't lose or interrupt anything in flight —
- * ChatInterface's streaming callbacks write to the Zustand store directly,
- * not to component state.
+ * Defaults OPEN on load (see chatWidgetUiStore), not closed: unlike a
+ * typical support-chat widget, chat is PayNexus's actual core feature, not
+ * a secondary channel — defaulting it closed would make a first-time
+ * user's main way of asking a question invisible until they noticed the
+ * button. Conversation state (chatStore) is independent of whether this
+ * panel is mounted, so minimizing mid-answer doesn't lose or interrupt
+ * anything in flight — ChatInterface's streaming callbacks write to the
+ * Zustand store directly, not to component state.
  *
  * Maximize toggles between the small floating panel and a near-full-screen
  * one — added because the default 520px width crowds a wide DataTable
@@ -20,10 +20,19 @@ import { ChatInterface } from "../Chat/ChatInterface";
  * user has to fight with. Minimizing always resets `maximized` back to
  * false, so reopening starts at the normal size rather than remembering a
  * maximized state that made sense for one long answer but not the next.
+ *
+ * open/maximized live in a shared store (not local useState) so App.tsx
+ * can reserve a right-hand margin on <main> while this panel is open — see
+ * chatWidgetUiStore.ts. Without that, the panel's ~520px floating width
+ * sits directly on top of page content on a standard 1280px viewport,
+ * fully hiding right-side controls (a goal's Delete/"Update progress"
+ * buttons, confirmed via live testing).
  */
 export function ChatWidget() {
-  const [open, setOpen] = useState(true);
-  const [maximized, setMaximized] = useState(false);
+  const open = useChatWidgetUiStore((s) => s.open);
+  const maximized = useChatWidgetUiStore((s) => s.maximized);
+  const setOpen = useChatWidgetUiStore((s) => s.setOpen);
+  const setMaximized = useChatWidgetUiStore((s) => s.setMaximized);
 
   function handleMinimize() {
     setOpen(false);
@@ -57,7 +66,7 @@ export function ChatWidget() {
         </div>
         <div className="flex items-center gap-1">
           <button
-            onClick={() => setMaximized((m) => !m)}
+            onClick={() => setMaximized(!maximized)}
             aria-label={maximized ? "Restore chat size" : "Maximize chat"}
             title={maximized ? "Restore" : "Maximize"}
             className="rounded p-1 hover:bg-white/15"

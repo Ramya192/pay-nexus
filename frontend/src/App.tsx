@@ -13,6 +13,7 @@ import { buildExchanges } from "./utils/exchanges";
 import { useAuthStore } from "./store/authStore";
 import { useBudgetStore } from "./store/budgetStore";
 import { useChatStore } from "./store/chatStore";
+import { useChatWidgetUiStore } from "./store/chatWidgetUiStore";
 import { useFinancialProfileStore } from "./store/financialProfileStore";
 import { useGoalStore } from "./store/goalStore";
 import { usePayslipHistoryStore } from "./store/payslipHistoryStore";
@@ -32,6 +33,8 @@ export default function App() {
   const transactions = useTransactionStore((s) => s.transactions);
   const budget = useBudgetStore((s) => s.budget);
   const goals = useGoalStore((s) => s.goals);
+  const chatOpen = useChatWidgetUiStore((s) => s.open);
+  const chatMaximized = useChatWidgetUiStore((s) => s.maximized);
   // Recomputed only when the underlying data actually changes — these are
   // pure functions of date + already-loaded data (utils/alerts.ts), not an
   // LLM call, so this is cheap enough to just be a memo, not a fetch.
@@ -86,7 +89,19 @@ export default function App() {
       </header>
       {import.meta.env.DEV && <DevAlertPreview value={previewKey} onChange={setPreviewKey} />}
       <AlertBanner alerts={alerts} />
-      <main className="flex-1 overflow-y-auto p-6">
+      {/* The chat panel floats at fixed bottom-5 right-5, ~520px wide, and
+          isn't part of this flex layout (position: fixed takes it out of
+          flow) — so its overlap with right-side page content (e.g. a
+          goal's Delete/"Update progress" buttons, confirmed hidden behind
+          it) has to be fixed here by reserving matching space, not by
+          anything the panel itself can do. Only applied at `lg` and up:
+          below that breakpoint the panel already grows to near-full-width
+          per its own `calc(100vw-2.5rem)` sizing, where reserving the same
+          margin would crush the content instead of the two coexisting.
+          Skipped while maximized — that state already covers virtually the
+          whole screen (`inset-4`/`inset-8`), so there's no content margin
+          worth reserving underneath it. */}
+      <main className={`flex-1 overflow-y-auto p-6 ${chatOpen && !chatMaximized ? "lg:pr-[560px]" : ""}`}>
         <TabbedPanel />
       </main>
       <ChatWidget />

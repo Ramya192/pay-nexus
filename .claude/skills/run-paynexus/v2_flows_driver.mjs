@@ -59,15 +59,13 @@ try {
   record("register + land on main app", true);
   await shot(page, "01-registered");
 
-  // REAL BUG found here: the floating chat widget (~520px wide, fixed
-  // bottom-right) sits directly on top of the right half of every tab's
-  // content on a completely standard 1280px viewport -- it fully hides the
-  // Delete/"Update progress" buttons for any goal (or other right-side
-  // control) that falls in that region. Minimizing it here so the rest of
-  // this script can proceed, but this is a genuine usability bug to fix in
-  // the app, not just a script workaround -- see the write-up after this run.
-  await page.click('button[aria-label="Minimize chat"]');
-  await page.waitForTimeout(300);
+  // Chat panel is left open (its default) deliberately, unlike earlier
+  // runs of this script -- it used to have to be minimized here to avoid
+  // its ~520px floating width covering right-side controls (a goal's
+  // Delete/"Update progress" buttons) on this 1280px viewport. App.tsx now
+  // reserves a matching right-hand margin on <main> while the panel is
+  // open (chatWidgetUiStore.ts), so this script proceeding with it open is
+  // itself the regression check for that fix.
 
   // ── Financial profile (Investments & loans) ────────────────────────
   console.log("--- financial profile: save ---");
