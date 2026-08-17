@@ -1,10 +1,13 @@
 import { useState } from "react";
 import { streamChat } from "../../api/chat";
+import { useBudgetStore } from "../../store/budgetStore";
 import { useChatStore } from "../../store/chatStore";
 import { useFinancialProfileStore } from "../../store/financialProfileStore";
+import { useGoalStore } from "../../store/goalStore";
 import { usePayslipHistoryStore } from "../../store/payslipHistoryStore";
 import { usePayslipStore } from "../../store/payslipStore";
 import { useSessionHistoryStore } from "../../store/sessionHistoryStore";
+import { useTransactionStore } from "../../store/transactionStore";
 import { buildExchanges } from "../../utils/exchanges";
 import { ChatInput } from "./ChatInput";
 import { MessageList } from "./MessageList";
@@ -19,6 +22,9 @@ export function ChatInterface() {
   const financialProfile = useFinancialProfileStore((s) => s.profile);
   const sessionHistory = useSessionHistoryStore((s) => s.history);
   const payslipHistory = usePayslipHistoryStore((s) => s.snapshots);
+  const transactions = useTransactionStore((s) => s.transactions);
+  const goals = useGoalStore((s) => s.goals);
+  const budgets = useBudgetStore((s) => s.budget);
 
   async function handleSend(text: string) {
     // Captured BEFORE adding this turn's own (still-empty) entries below —
@@ -53,6 +59,9 @@ export function ChatInterface() {
           sessionHistory,
           payslipHistory,
           conversation,
+          transactions,
+          goals,
+          budgets: budgets as Record<string, unknown> | null,
         },
         (event) => {
           if (event.event === "agent_active" && event.agent) {

@@ -53,6 +53,7 @@ from tax_slabs import (
     compute_new_regime_tax,
     compute_old_regime_tax,
     estimate_annual_gross_income,
+    regime_choice_available,
     tax_liability_table,
 )
 
@@ -82,11 +83,13 @@ asking "what have I entered" wants their own entered numbers read back, not a su
 
 If the user asks about duplicate payslips/months — "are there duplicates," "check for duplicates," \
 "do I have the same month twice" — answer from the "Duplicate-month check" section only, which is \
-already computed exactly; don't guess from the raw snapshot count or confuse this with declared \
+already computed exactly (including when there's no payslip history at all — that section says so \
+plainly, don't independently claim "no duplicates found" if it says no history exists yet, those \
+are different answers); don't guess from the raw snapshot count or confuse this with declared \
 investments/insurance, which is a separate topic. You can't delete anything yourself — if the user \
 wants duplicates removed, say so and point to the "Remove duplicates" button in the Payslip history \
-section of the sidebar, don't offer to do it here (the "Duplicate-month check" section already \
-gives you the exact wording for this).
+tab, don't offer to do it here (the "Duplicate-month check" section already gives you the exact \
+wording for this).
 
 If a "Tax liability estimate" figure is given below, it's a real computed old-vs-new regime ₹ tax
 comparison (exact slab math — not a guess), and a "Regime comparison" line right after it already
@@ -164,19 +167,25 @@ def nudge_agent_node(state: PayNexusState) -> dict:
             f"{payslip_data.get('month', 'unknown')}). Say so plainly if it affects your answer."
         )
 
-    if payslip_history:
-        prompt_parts.append("Payslip trends (already computed):\n" + format_trends_for_prompt(payslip_history))
-        # Always included alongside trends, not just when asked — cheap to
-        # compute and short to state, and the alternative (only checking
-        # when the question happens to mention "duplicate") is exactly how
-        # this went wrong before: asked to verify duplicates, the agent had
-        # nothing computed to answer from and answered about financial
-        # profile figures instead, a completely different topic.
-        prompt_parts.append(format_duplicates_for_prompt(payslip_history))
-        if (t := trends_table(payslip_history)) is not None:
-            available_tables["trends"] = t
-        if (d := duplicates_table(payslip_history)) is not None:
-            available_tables["duplicates"] = d
+    # Unconditional, even with an empty payslip_history — both functions
+    # below already produce an honest "nothing on file yet" sentence for
+    # the empty case (see their own docstrings), and previously being
+    # skipped entirely whenever payslip_history was empty is exactly how
+    # this went wrong twice in testing: once, asked to verify duplicates,
+    # the agent had nothing computed to answer from and answered about
+    # financial profile figures instead (a completely different topic);
+    # later, with genuinely zero saved payslips, it had no "Duplicate-month
+    # check" section to quote at all and improvised "no duplicates found" —
+    # true in the vacuous sense, but implying a real check ran against
+    # existing history when there wasn't any. The *_table() builders stay
+    # conditional on their own return value (None when there's nothing to
+    # show), so no misleading empty table appears either way.
+    prompt_parts.append("Payslip trends (already computed):\n" + format_trends_for_prompt(payslip_history))
+    prompt_parts.append(format_duplicates_for_prompt(payslip_history))
+    if (t := trends_table(payslip_history)) is not None:
+        available_tables["trends"] = t
+    if (d := duplicates_table(payslip_history)) is not None:
+        available_tables["duplicates"] = d
 
     total_deductions = 0.0
     if financial_profile:
@@ -211,7 +220,17 @@ def nudge_agent_node(state: PayNexusState) -> dict:
     # so the two agents can never independently reach different regime
     # conclusions in the same multi-agent response (see module docstring).
     annual_income, income_note = estimate_annual_gross_income(payslip_data, payslip_history)
-    if annual_income > 0:
+    if annual_income > 0 and not regime_choice_available(payslip_data.get("month")):
+        # Same historical guard as payslip_agent.py — see
+        # tax_slabs.regime_choice_available's docstring.
+        prompt_parts.append(
+            f"This payslip is from {payslip_data.get('month')} — the new tax regime didn't exist "
+            "yet then (it was introduced in Union Budget 2020, effective FY2020-21/April 2020 "
+            "onward). Only the old regime was available for that period. If asked which regime "
+            "to choose or to compare regimes, say so plainly — there was no choice to make at "
+            "the time — rather than presenting a new-vs-old comparison."
+        )
+    elif annual_income > 0:
         old_result = compute_old_regime_tax(annual_income, total_deductions)
         new_result = compute_new_regime_tax(annual_income)
         prompt_parts.append(

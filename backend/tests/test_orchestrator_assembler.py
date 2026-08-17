@@ -6,7 +6,7 @@ string rendered in a nudge card). No LLM call in any of this — assembler_node
 only merges state that upstream agent nodes already produced.
 """
 
-from agents.orchestrator import _format_agent_response, _normalize_impact, _parse_nudge, assembler_node
+from agents.orchestrator import _format_agent_response, _normalize_impact, _parse_nudge, assembler_node, capability_gap_node
 
 
 class TestNormalizeImpact:
@@ -58,6 +58,17 @@ class TestFormatAgentResponse:
         assert "Your tax is lower under the new regime." in text
         assert "• Check 80C" in text
         assert "• Check HRA" in text
+
+    def test_follow_up_suggestions_are_labeled_not_bare_bullets(self):
+        """Found in testing: an unlabeled bullet list right after the
+        explanation read ambiguously — not clear it was suggested next
+        questions rather than more facts."""
+        raw = '{"explanation": "x", "follow_up_suggestions": ["Check 80C"]}'
+        assert "You can ask more like:" in _format_agent_response(raw)
+
+    def test_no_label_when_there_are_no_suggestions(self):
+        raw = '{"explanation": "x", "follow_up_suggestions": []}'
+        assert "You can ask more like:" not in _format_agent_response(raw)
 
     def test_plain_text_passed_through_unchanged(self):
         assert _format_agent_response("Section 80C allows up to ₹1,50,000.") == "Section 80C allows up to ₹1,50,000."
@@ -124,6 +135,34 @@ class TestAssemblerNodeSections:
         assert result["active_agent"] == ""
         assert "went wrong" in result["final_response"].lower()
 
+    def test_spending_response_labeled_and_active(self):
+        state = {"spending_response": '{"explanation": "You spent most on Rent.", "follow_up_suggestions": []}'}
+        result = assembler_node(state)
+        assert result["active_agent"] == "spending_agent"
+        assert "[SpendingAnalyser Agent]" in result["final_response"]
+        assert "You spent most on Rent." in result["final_response"]
+
+    def test_goal_response_labeled_and_active(self):
+        state = {"goal_response": '{"explanation": "Your Goa Trip goal is 25% funded.", "follow_up_suggestions": []}'}
+        result = assembler_node(state)
+        assert result["active_agent"] == "goal_agent"
+        assert "[GoalTracker Agent]" in result["final_response"]
+        assert "Your Goa Trip goal is 25% funded." in result["final_response"]
+
+    def test_scenario_response_labeled_and_active(self):
+        state = {"scenario_response": '{"explanation": "Switching regimes would save you money.", "follow_up_suggestions": []}'}
+        result = assembler_node(state)
+        assert result["active_agent"] == "whatif_agent"
+        assert "[Foresight Agent]" in result["final_response"]
+        assert "Switching regimes would save you money." in result["final_response"]
+
+    def test_budget_response_labeled_and_active(self):
+        state = {"budget_response": '{"explanation": "You are over on Food & Dining.", "follow_up_suggestions": []}'}
+        result = assembler_node(state)
+        assert result["active_agent"] == "budget_agent"
+        assert "[BudgetPlanner Agent]" in result["final_response"]
+        assert "You are over on Food & Dining." in result["final_response"]
+
     def test_unsupported_response_labeled_as_paynexus_not_an_agent(self):
         state = {"unsupported_response": "I can't modify your payslip data directly."}
         result = assembler_node(state)
@@ -141,3 +180,26 @@ class TestAssemblerNodeSections:
         }
         result = assembler_node(state)
         assert result["token_usage"]["total_input_tokens"] == 200
+
+
+class TestCapabilityGapNode:
+    """Regression coverage for a real bug found in testing: this node's
+    canned message referred to the old sidebar layout ('Open the Payslip
+    history section in the sidebar') well after it was replaced by tabs
+    (components/Dashboard/TabbedPanel.tsx), and only ever mentioned
+    Payslip history even when the request was about a bank statement,
+    goal, or budget."""
+
+    def test_never_mentions_the_old_sidebar(self):
+        result = capability_gap_node({})
+        assert "sidebar" not in result["unsupported_response"].lower()
+
+    def test_mentions_every_v2_data_type_with_a_delete_control(self):
+        message = capability_gap_node({})["unsupported_response"]
+        for keyword in ("Bank statements", "Payslip history", "Goals", "Budget"):
+            assert keyword in message
+
+    def test_no_llm_call_needed(self):
+        """Deterministic — same input, same output, no network/mock setup
+        required. Locks in the node's own 'no LLM call' design intent."""
+        assert capability_gap_node({}) == capability_gap_node({"user_query": "delete my Goa trip goal"})

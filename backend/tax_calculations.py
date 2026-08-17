@@ -8,12 +8,12 @@ prompt history); this removes that failure mode for the figures it can
 compute, rather than just asking the model to double-check its own math.
 
 Simplifications, stated plainly rather than silently baked in:
-- 80C counts ELSS mutual funds + home loan principal + life insurance
-  premium + the payslip's employee PF contribution (annualized as
-  monthly x 12 — an estimate when only one month's payslip is on file, not
-  a real annual total). PPF, NSC, tax-saver FDs, tuition fees, and several
-  other real 80C instruments aren't collected by FinancialProfile at all,
-  so aren't counted here.
+- 80C counts ELSS mutual funds + PPF contribution + home loan principal +
+  life insurance premium + the payslip's employee PF contribution
+  (annualized as monthly x 12 — an estimate when only one month's payslip
+  is on file, not a real annual total). NSC, tax-saver FDs, tuition fees,
+  and several other real 80C instruments still aren't collected by
+  FinancialProfile at all, so still aren't counted here.
 - 80D is treated as one combined premium against one cap (₹25k, or ₹50k if
   `healthInsuranceForSeniorCitizen` is set). The real rule has a separate
   bucket for parents' premiums that can push the true combined cap to ₹1L
@@ -39,6 +39,7 @@ SECTION_24B_LIMIT = 200_000
 # below (which sum several fields together and lose the per-field detail).
 _FIELD_LABELS = {
     "elssMutualFunds": "ELSS mutual funds",
+    "ppf": "PPF contribution",
     "otherMutualFunds": "Other mutual funds",
     "stocks": "Stocks",
     "fdPrincipal": "Fixed deposits — principal",
@@ -71,6 +72,7 @@ def _num(value) -> float:
 
 def compute_80c(financial_profile: dict, payslip_data: dict | None = None) -> DeductionGap:
     elss = _num(financial_profile.get("elssMutualFunds"))
+    ppf = _num(financial_profile.get("ppf"))
     life_insurance = _num(financial_profile.get("lifeInsurancePremium"))
     home_loan_principal = _num(financial_profile.get("homeLoanPrincipalPaid"))
 
@@ -80,7 +82,7 @@ def compute_80c(financial_profile: dict, payslip_data: dict | None = None) -> De
         pf_annualized = _num(payslip_data.get("pfEmployee")) * 12
         pf_note = "Includes PF annualized as one month's payslip figure x 12 — an estimate, not a confirmed annual total."
 
-    raw_used = elss + life_insurance + home_loan_principal + pf_annualized
+    raw_used = elss + ppf + life_insurance + home_loan_principal + pf_annualized
     used = min(raw_used, SECTION_80C_LIMIT)
     return DeductionGap(
         label="Section 80C",

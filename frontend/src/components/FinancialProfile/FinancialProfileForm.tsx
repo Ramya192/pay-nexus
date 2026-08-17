@@ -21,6 +21,7 @@ const SECTIONS: Section[] = [
     title: "Investments",
     fields: [
       { key: "elssMutualFunds", label: "ELSS mutual funds (₹/yr)", hint: "80C" },
+      { key: "ppf", label: "PPF contribution (₹/yr)", hint: "80C" },
       { key: "otherMutualFunds", label: "Other mutual funds (₹)", hint: "not a deduction" },
       { key: "stocks", label: "Stocks (₹)", hint: "not a deduction" },
     ],

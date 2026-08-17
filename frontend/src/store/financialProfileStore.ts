@@ -4,6 +4,7 @@ import { create } from "zustand";
 // documentation exactly — no remapping needed at the API boundary.
 export interface FinancialProfile {
   elssMutualFunds?: number;
+  ppf?: number;
   otherMutualFunds?: number;
   stocks?: number;
   fdPrincipal?: number;

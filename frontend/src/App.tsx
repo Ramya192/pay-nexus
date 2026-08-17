@@ -11,11 +11,14 @@ import { encryptJSON } from "./crypto/clientEncryption";
 import { computeAlerts } from "./utils/alerts";
 import { buildExchanges } from "./utils/exchanges";
 import { useAuthStore } from "./store/authStore";
+import { useBudgetStore } from "./store/budgetStore";
 import { useChatStore } from "./store/chatStore";
 import { useFinancialProfileStore } from "./store/financialProfileStore";
+import { useGoalStore } from "./store/goalStore";
 import { usePayslipHistoryStore } from "./store/payslipHistoryStore";
 import { usePayslipStore } from "./store/payslipStore";
 import { useSessionHistoryStore } from "./store/sessionHistoryStore";
+import { useTransactionStore } from "./store/transactionStore";
 
 export default function App() {
   const token = useAuthStore((s) => s.token);
@@ -26,12 +29,15 @@ export default function App() {
   const [previewKey, setPreviewKey] = useState("real"); // dev-only override, see DevAlertPreview.tsx
   const snapshots = usePayslipHistoryStore((s) => s.snapshots);
   const financialProfile = useFinancialProfileStore((s) => s.profile);
+  const transactions = useTransactionStore((s) => s.transactions);
+  const budget = useBudgetStore((s) => s.budget);
+  const goals = useGoalStore((s) => s.goals);
   // Recomputed only when the underlying data actually changes — these are
   // pure functions of date + already-loaded data (utils/alerts.ts), not an
   // LLM call, so this is cheap enough to just be a memo, not a fetch.
   const alerts = useMemo(
-    () => computeAlerts(resolvePreviewDate(previewKey), snapshots, financialProfile),
-    [previewKey, snapshots, financialProfile]
+    () => computeAlerts(resolvePreviewDate(previewKey), snapshots, financialProfile, transactions, budget, goals),
+    [previewKey, snapshots, financialProfile, transactions, budget, goals]
   );
 
   if (!token) return <AuthScreen />;
@@ -50,6 +56,9 @@ export default function App() {
       useFinancialProfileStore.getState().clear();
       usePayslipHistoryStore.getState().clear();
       useSessionHistoryStore.getState().clear();
+      useTransactionStore.getState().clear();
+      useGoalStore.getState().clear();
+      useBudgetStore.getState().clear();
       logout();
       setLoggingOut(false);
     }

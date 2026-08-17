@@ -37,7 +37,9 @@ export function DevAlertPreview({
         <span>— also needs the "Investments &amp; loans" tab filled in to actually appear</span>
       )}
       <span className="text-amber-600">
-        (stale-payslip isn't date-based — it shows on its own once a saved snapshot is 2+ months old)
+        (stale-payslip/stale-statement/overspending/goal-deadline aren't date-window based — they show on their
+        own once a saved snapshot is 2+ months old, a statement is 2+ months old, a category is over its
+        budget, or a goal's target date is within 30 days, respectively)
       </span>
     </div>
   );

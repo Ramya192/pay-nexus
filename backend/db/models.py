@@ -1,5 +1,5 @@
 """
-SQLAlchemy ORM models — three tables, matching PROJECT_CONTEXT.md §4 and §9.
+SQLAlchemy ORM models — matching PROJECT_CONTEXT.md §4 and §9.
 
 users               auth (login) + the salt issued at registration that the
                      client re-derives its AES-256-GCM key from.
@@ -9,6 +9,28 @@ session_summaries    ciphertext, compressed cross-session summaries — what
                      GET /payslip/history hands the Nudge Agent (Agent 3).
                      Plaintext shape, once decrypted client-side, is the
                      JSON documented in PROJECT_CONTEXT.md §6.
+bank_statements      ciphertext only — POST /statement/save (SpendingAnalyser,
+                     V2). Same growing-log shape as payslip_snapshots; see
+                     that class for why. The parsed-and-categorized
+                     transaction list is the plaintext (once decrypted
+                     client-side), matching models.Transaction.
+goals                ciphertext only — POST/PUT /goals (Goal Tracker UI, V2).
+                     One row per goal (Trip, Home Loan, ...); no plaintext
+                     discriminator field, unlike payslip_snapshots' month or
+                     bank_statements' source_account+period_label — see that
+                     class's own docstring for why none is needed here.
+budgets              ciphertext only — PUT /budget (BudgetPlanner, V2). One
+                     row per user, upserted in place — same singleton shape
+                     as financial_profiles, not a growing log; a budget is a
+                     standing target that gets edited, not a new one every
+                     period.
+aa_consents          PLAINTEXT — POST /aa/consent (Account Aggregator
+                     integration, V2). The one table in this file that
+                     isn't ciphertext, deliberately: a Setu consent id and
+                     its status aren't financial figures, same reasoning
+                     bank_statements' source_account/period_label already
+                     gets to stay plaintext. Growing-log, one row per
+                     consent request.
 
 Password hashing (login) and AES key derivation (payslip encryption) are
 deliberately separate concerns: `hashed_password` authenticates the user;
@@ -54,6 +76,16 @@ class User(Base):
     )
     financial_profile: Mapped["FinancialProfile | None"] = relationship(
         back_populates="user", cascade="all, delete-orphan", uselist=False
+    )
+    bank_statements: Mapped[list["BankStatement"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    goals: Mapped[list["Goal"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    budget: Mapped["Budget | None"] = relationship(
+        back_populates="user", cascade="all, delete-orphan", uselist=False
+    )
+    aa_consents: Mapped[list["AAConsent"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
     )
 
 
@@ -122,3 +154,148 @@ class FinancialProfile(Base):
     )
 
     user: Mapped["User"] = relationship(back_populates="financial_profile")
+
+
+class BankStatement(Base):
+    """One saved, parsed-and-categorized bank/credit-card statement upload
+    (SpendingAnalyser, V2). Growing-log, same shape as PayslipSnapshot —
+    `ciphertext` is the AES-256-GCM blob of the full transaction list
+    (models.Transaction, encoded client-side after POST /statement/parse
+    returns it), `iv` is the per-encryption nonce.
+
+    `source_account` and `period_label` are the one plaintext discriminator
+    pair kept server-side, same reasoning as PayslipSnapshot.month: enough
+    to detect a duplicate upload (same account, same statement period) and
+    to list statements in the UI, without the server ever seeing a
+    transaction description or amount.
+
+    `content_hash` is a second, independent duplicate signal: a SHA-256
+    fingerprint of the transaction list itself (date+description+amount,
+    deliberately excluding source_account and category — see
+    frontend/src/utils/contentHash.ts), computed client-side and sent
+    alongside the ciphertext. It exists because source_account/period_label
+    alone can't catch the same real statement re-saved under a *different*
+    account name (a real gap found in testing) — the server still never
+    sees a transaction description or amount, only this one-way hash of
+    them, same non-reversibility a password hash relies on. Nullable
+    because statements saved before this column existed have no value to
+    backfill (recomputing it would mean decrypting their ciphertext
+    server-side, which this app never does) — those rows just don't
+    participate in hash-based duplicate detection, which is an acceptable
+    gap for old data, not a bug.
+    """
+
+    __tablename__ = "bank_statements"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True, nullable=False)
+    source_account: Mapped[str] = mapped_column(String(100), nullable=False)  # e.g. "HDFC Checking"
+    # Widened from String(20) to String(60) — a calendar-aligned bank
+    # statement fits "2026-07" easily, but a credit card's own billing
+    # cycle (e.g. "16 Jul 2026 to 15 Aug 2026", 26 chars) doesn't, and
+    # Postgres hard-fails on overflow rather than silently truncating like
+    # MySQL would. See analytics/spending_trends.py's module docstring for
+    # why period_label needs to hold a real billing-cycle description, not
+    # just "YYYY-MM", in the first place.
+    period_label: Mapped[str] = mapped_column(String(60), nullable=False)  # e.g. "2026-07" or "16 Jul 2026 to 15 Aug 2026"
+    ciphertext: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    iv: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    content_hash: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    user: Mapped["User"] = relationship(back_populates="bank_statements")
+
+
+class Goal(Base):
+    """One savings goal — Trip, Home Loan, Education, Emergency Fund, etc.
+    (Goal Tracker UI, V2). `ciphertext` is the AES-256-GCM blob of
+    {name, category, target_amount, target_date, saved_amount} (plaintext
+    shape documented in frontend/src/store/goalStore.ts), `iv` is the
+    per-encryption nonce.
+
+    Growing-log like PayslipSnapshot/BankStatement (one row per goal, not a
+    singleton like FinancialProfile — a user can have several goals at
+    once), but with no plaintext discriminator field: a user can have two
+    goals with the same name/category (e.g. two separate "Trip" goals), so
+    there's nothing here worth exposing server-side for dedup the way
+    PayslipSnapshot.month or BankStatement's (source_account, period_label)
+    pair are. Editable in place via PUT /goals/{id} (progress toward a goal
+    changes over time) rather than only ever appended to — the one growing-
+    log table here that also supports update, not just create+delete.
+
+    Read (not written) by the GoalTracker LangGraph agent (agents/
+    goal_agent.py) — narrates target-vs-saved progress and, when
+    transactions are also on file, compares it against an actual savings
+    rate. Live FD/stock price lookups for market-linked goals are still not
+    built — every goal is treated as a flat cash target for now.
+    """
+
+    __tablename__ = "goals"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True, nullable=False)
+    ciphertext: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    iv: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    user: Mapped["User"] = relationship(back_populates="goals")
+
+
+class Budget(Base):
+    """Encrypted per-category monthly budget — {category: amount} dict
+    (plaintext shape once decrypted client-side; keys match
+    categorization/categories.py's CATEGORIES). One row per user, upserted
+    in place (PUT /budget), same singleton reasoning as FinancialProfile:
+    a budget is a standing target the user edits over time, not a new one
+    every period — the periods it gets *checked against* come from
+    transactions already saved via BankStatement, not from this table.
+    """
+
+    __tablename__ = "budgets"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id"), unique=True, index=True, nullable=False
+    )
+    ciphertext: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    iv: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    user: Mapped["User"] = relationship(back_populates="budget")
+
+
+class AAConsent(Base):
+    """One Account Aggregator consent request (Setu sandbox, V2) — the
+    ONLY plaintext table in this file; see this module's docstring for why
+    a consent id/status isn't financial data the way everything else here
+    is. `id` is Setu's own consent id (not a locally-generated UUID) so a
+    webhook notification keyed by consent id can look the row up directly.
+    `vua` (the mobile number + AA handle consent was requested for) is
+    kept for reference/debugging, not because it's sensitive at this tier.
+
+    Never holds actual account data — status only (PENDING/ACTIVE/REJECTED/
+    REVOKED/EXPIRED, per Setu's CONSENT_STATUS_UPDATE notification shape).
+    The real financial data a completed consent unlocks flows through
+    POST /aa/fetch -> aa_transaction_mapping.py -> the same
+    models.Transaction shape and POST /statement/save ciphertext contract
+    as every other ingestion path — never persisted in this table.
+    """
+
+    __tablename__ = "aa_consents"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)  # Setu's own consent id
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True, nullable=False)
+    vua: Mapped[str] = mapped_column(String(100), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="PENDING")
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    user: Mapped["User"] = relationship(back_populates="aa_consents")

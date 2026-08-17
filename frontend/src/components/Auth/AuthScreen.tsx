@@ -1,12 +1,18 @@
 import { useState, type ChangeEvent, type FormEvent } from "react";
 import { login, register } from "../../api/auth";
+import { fetchBudget } from "../../api/budget";
 import { fetchFinancialProfile } from "../../api/financialProfile";
+import { fetchGoals } from "../../api/goals";
 import { fetchHistory, fetchSnapshots } from "../../api/payslip";
+import { fetchStatements, type ParsedTransaction } from "../../api/statement";
 import { decryptJSON, deriveEncryptionKey } from "../../crypto/clientEncryption";
 import { useAuthStore } from "../../store/authStore";
+import { useBudgetStore, type Budget } from "../../store/budgetStore";
 import { useFinancialProfileStore, type FinancialProfile } from "../../store/financialProfileStore";
+import { useGoalStore, type Goal, type GoalEntry } from "../../store/goalStore";
 import { usePayslipHistoryStore, type SnapshotEntry } from "../../store/payslipHistoryStore";
 import { useSessionHistoryStore } from "../../store/sessionHistoryStore";
+import { useTransactionStore, type StatementEntry } from "../../store/transactionStore";
 
 export function AuthScreen() {
   const [mode, setMode] = useState<"login" | "register">("login");
@@ -18,6 +24,9 @@ export function AuthScreen() {
   const setHistory = useSessionHistoryStore((s) => s.setHistory);
   const setFinancialProfile = useFinancialProfileStore((s) => s.setProfile);
   const setEntries = usePayslipHistoryStore((s) => s.setEntries);
+  const setStatementEntries = useTransactionStore((s) => s.setEntries);
+  const setGoalEntries = useGoalStore((s) => s.setEntries);
+  const setBudget = useBudgetStore((s) => s.setBudget);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -89,6 +98,69 @@ export function AuthScreen() {
         setEntries(decrypted);
       } catch (snapshotsErr) {
         console.warn("Could not load payslip snapshots", snapshotsErr);
+      }
+
+      // Same row-by-row resilience — one bad statement shouldn't block
+      // login or drop every other saved statement.
+      try {
+        const rows = await fetchStatements();
+        const decrypted: StatementEntry[] = [];
+        for (const row of rows) {
+          try {
+            const transactions = await decryptJSON<ParsedTransaction[]>(aesKey, {
+              ciphertextB64: row.ciphertext_b64,
+              ivB64: row.iv_b64,
+            });
+            decrypted.push({
+              id: row.id,
+              sourceAccount: row.source_account,
+              periodLabel: row.period_label,
+              createdAt: row.created_at,
+              transactions,
+            });
+          } catch (rowErr) {
+            console.warn("Skipping undecryptable bank statement", row.id, rowErr);
+          }
+        }
+        setStatementEntries(decrypted);
+      } catch (statementsErr) {
+        console.warn("Could not load bank statements", statementsErr);
+      }
+
+      // Same row-by-row resilience — one bad goal shouldn't block login or
+      // drop every other saved goal.
+      try {
+        const rows = await fetchGoals();
+        const decrypted: GoalEntry[] = [];
+        for (const row of rows) {
+          try {
+            const data = await decryptJSON<Goal>(aesKey, {
+              ciphertextB64: row.ciphertext_b64,
+              ivB64: row.iv_b64,
+            });
+            decrypted.push({ id: row.id, createdAt: row.created_at, data });
+          } catch (rowErr) {
+            console.warn("Skipping undecryptable goal", row.id, rowErr);
+          }
+        }
+        setGoalEntries(decrypted);
+      } catch (goalsErr) {
+        console.warn("Could not load goals", goalsErr);
+      }
+
+      // Same pattern as the financial profile — null just means no budget
+      // saved yet (fetchBudget already treats 404 as that, not an error).
+      try {
+        const row = await fetchBudget();
+        if (row) {
+          const budget = await decryptJSON<Budget>(aesKey, {
+            ciphertextB64: row.ciphertext_b64,
+            ivB64: row.iv_b64,
+          });
+          setBudget(budget);
+        }
+      } catch (budgetErr) {
+        console.warn("Could not load budget", budgetErr);
       }
     } catch {
       setError(

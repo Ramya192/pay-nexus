@@ -27,6 +27,12 @@ export interface StreamChatParams {
   payslipHistory: Record<string, unknown>[];
   /** THIS session's exchanges so far — lets a follow-up resolve against what was just asked; see backend/agents/conversation.py. */
   conversation: Exchange[];
+  /** V2 — decrypted, categorized transactions flattened across every saved bank statement; see store/transactionStore.ts and backend/agents/spending_agent.py. */
+  transactions: Record<string, unknown>[];
+  /** V2 — decrypted savings goals; see store/goalStore.ts and backend/agents/goal_agent.py. */
+  goals: Record<string, unknown>[];
+  /** V2 — decrypted {category: amount} budget, or null if none saved yet; see store/budgetStore.ts and backend/agents/budget_agent.py. */
+  budgets: Record<string, unknown> | null;
 }
 
 /**
@@ -58,6 +64,9 @@ export async function streamChat(
       session_history: params.sessionHistory,
       payslip_history: params.payslipHistory,
       conversation: params.conversation,
+      transactions: params.transactions,
+      goals: params.goals,
+      budgets: params.budgets,
     }),
   });
 

@@ -159,6 +159,32 @@ def estimate_annual_gross_income(payslip_data: dict, payslip_history: list[dict]
     )
 
 
+NEW_REGIME_AVAILABLE_FROM = "2020-04"  # Union Budget 2020, effective FY2020-21
+
+
+def regime_choice_available(payslip_month: str | None) -> bool:
+    """Whether a choice between old and new regime existed at all for the
+    given payslip month ("YYYY-MM") — the new regime was introduced in
+    Union Budget 2020, effective FY2020-21 (April 2020 onward); before
+    that there was only ever one regime, so presenting a "the new regime
+    saves you ₹X" comparison for an older payslip would be historically
+    meaningless, not just imprecise. Distinct from this module's FY_LABEL
+    caveat above, which is about CURRENT-year rate accuracy, not whether
+    the new regime existed at all — this catches a different failure mode:
+    asked to recommend a regime for a 2019 payslip, this codebase would
+    otherwise silently run today's slabs against it and present a choice
+    that was never actually on the table.
+
+    Returns True for a missing/unparseable month — the overwhelming
+    majority of real payslips on file will be recent, so this is a
+    targeted historical guard, not a reason to withhold a normal
+    comparison just because a month happens to be absent.
+    """
+    if not payslip_month or len(payslip_month) < 7:
+        return True
+    return payslip_month >= NEW_REGIME_AVAILABLE_FROM
+
+
 def cheaper_regime_statement(old_result: TaxResult, new_result: TaxResult) -> str:
     """The recommendation itself, computed here — not left for the LLM to
     derive from the two totals. Found necessary after a real, observed

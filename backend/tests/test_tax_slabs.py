@@ -16,6 +16,7 @@ from tax_slabs import (
     compute_new_regime_tax,
     compute_old_regime_tax,
     estimate_annual_gross_income,
+    regime_choice_available,
 )
 
 
@@ -132,3 +133,29 @@ class TestEstimateAnnualGrossIncome:
     def test_bonus_field_included_in_gross(self):
         income, _ = estimate_annual_gross_income({"basic": 42_000, "bonus": 8_000}, [])
         assert income == (42_000 + 8_000) * 12
+
+
+class TestRegimeChoiceAvailable:
+    """The new tax regime was introduced in Union Budget 2020, effective
+    FY2020-21 (April 2020 onward) — before that there was only ever one
+    regime. A real gap found in testing: nothing checked this, so asking
+    'which regime should I choose' for an old payslip would silently run
+    today's slabs and present a choice that was never actually on offer."""
+
+    def test_payslip_before_new_regime_existed(self):
+        assert regime_choice_available("2019-06") is False
+        assert regime_choice_available("2020-03") is False  # FY2019-20, last month before the cutover
+
+    def test_payslip_from_the_first_month_new_regime_existed(self):
+        assert regime_choice_available("2020-04") is True
+
+    def test_recent_payslip(self):
+        assert regime_choice_available("2026-03") is True
+
+    def test_missing_or_unparseable_month_defaults_to_available(self):
+        """Doesn't withhold a normal comparison just because the month
+        happens to be absent — the overwhelming majority of real payslips
+        on file will be recent."""
+        assert regime_choice_available(None) is True
+        assert regime_choice_available("") is True
+        assert regime_choice_available("2026") is True  # too short to be "YYYY-MM"

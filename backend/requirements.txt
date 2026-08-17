@@ -25,6 +25,7 @@ python-jose[cryptography]>=3.3   # the [cryptography] extra also covers security
 python-dotenv>=1.0
 pydantic[email]>=2.8          # EmailStr validation on auth request schemas — [email] extra already includes pydantic itself
 bcrypt>=4.0                   # login password hashing (security/auth.py calls it directly, not via passlib)
+httpx>=0.27                   # setu_aa_client.py's HTTP calls to Setu's Account Aggregator sandbox API — already an indirect dependency (fastapi/openai), pinned directly since this codebase now calls it on its own
 
 # Local SLM path (USE_LOCAL_SLM=True) — talks to a locally running Ollama server
 # via langchain-ollama, not a Python dependency of Ollama itself.
