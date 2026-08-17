@@ -51,9 +51,11 @@ I save" might hit all three. Their responses get merged and shown together.
 
 CI/CD: `.github/workflows/deploy.yml` — pushes to `main` build+push the backend image to Docker Hub (Azure's
 Continuous Deployment webhook then re-pulls it automatically) and build+deploy the frontend to Static Web
-Apps. Real ongoing cost: **~$34/month** (Postgres + App Service; Static Web Apps and Docker Hub are free),
-currently running against a $200 Azure free-trial credit with a hard spending limit (no card can be
-charged).
+Apps. The webhook needs "SCM Basic Auth Publishing Credentials" enabled on the App Service (Settings →
+Configuration) to even retrieve its own URL from Deployment Center — found disabled (silently breaking
+auto-deploy) and re-enabled 2026-08-17, re-verified against a real push after. Real ongoing cost:
+**~$34/month** (Postgres + App Service; Static Web Apps and Docker Hub are free), currently running
+against a $200 Azure free-trial credit with a hard spending limit (no card can be charged).
 
 ## Stack
 
