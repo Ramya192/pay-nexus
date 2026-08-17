@@ -62,17 +62,23 @@ alert via `localStorage`.
 | `paynexus-db-ramya` | PostgreSQL 16 + `pgvector`, separate `paynexus` (V1) / `paynexus_v2` (V2) databases on the same server | Azure Database for PostgreSQL Flexible Server (Burstable B1MS) |
 | `ramya192/paynexus-backend` | Backend container image — `:latest`/`:<sha>` tags for V1, `:v2-latest`/`:v2-<sha>` for V2, same repo | Docker Hub (free tier) |
 
-CI/CD: two independent workflows, so V1's and V2's deploys can never cross-trigger each other —
+CI/CD: two independent workflows, so V1's and V2's *builds* never cross-trigger each other —
 `.github/workflows/deploy.yml` (pushes to `main` → `paynexus-api`/`paynexus-web`) and
 `.github/workflows/deploy-v2.yml` (pushes to `v2-dev` → `paynexus-api-v2`/`paynexus-web-v2`). Each
 backend job builds+pushes its own image tag to Docker Hub; each App Service has its own Continuous
-Deployment webhook that re-pulls automatically on a push to its own tag. This is also why V2 has
-its *own* separate database (`paynexus_v2`) rather than sharing V1's live one — V2's still-evolving
-feature set writing into the same store V1's real users are on would be a real data-integrity risk,
-not just a deploy-pipeline one. Real ongoing cost: **~$34/month** (Postgres + one shared App Service
-Plan; Static Web Apps and Docker Hub are free, and a second App Service on the *same* Basic B1 plan
-doesn't add plan cost, just shares its compute), currently running against a $200 Azure free-trial
-credit with a hard spending limit (no card can be charged).
+Deployment webhook, both registered on the same `ramya192/paynexus-backend` Docker Hub repo since
+Docker Hub's classic webhooks aren't tag-scoped — a push to either branch pings *both* webhooks, but
+each App Service's CD webhook only ever re-pulls the specific tag it's configured for, so the
+"wrong" trigger just costs one harmless redundant restart on the other app, never a wrong deploy.
+Both webhooks need "SCM Basic Auth Publishing Credentials" enabled (Settings → Configuration) to
+even retrieve their URL from Deployment Center — found disabled on both apps (silently breaking
+auto-deploy, V1 probably for a while) and fixed 2026-08-17, re-verified against a real push after.
+This is also why V2 has its *own* separate database (`paynexus_v2`) rather than sharing V1's live
+one — V2's still-evolving feature set writing into the same store V1's real users are on would be a
+real data-integrity risk, not just a deploy-pipeline one. Real ongoing cost: **~$34/month** (Postgres
++ one shared App Service Plan; Static Web Apps and Docker Hub are free, and a second App Service on
+the *same* Basic B1 plan doesn't add plan cost, just shares its compute), currently running against
+a $200 Azure free-trial credit with a hard spending limit (no card can be charged).
 
 **Account Aggregator (AA) integration** — automatic bank-statement fetch via Setu/FinVu — was
 built and tested against both providers' real API contracts, then removed entirely rather than
