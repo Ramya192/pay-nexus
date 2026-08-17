@@ -2,52 +2,77 @@
 
 > "Your pay, explained. Your finances, guided."
 
-A multi-agent agentic AI system that helps salaried employees in India understand their payslip, tax
-regime, and financial decisions — not a chatbot, a coordinated team of three specialized reasoning agents
-behind a LangGraph orchestrator.
+A multi-agent agentic AI system for salaried employees in India — not a chatbot, a coordinated team
+of seven specialized reasoning agents behind a LangGraph orchestrator, covering payslips, tax
+regulation, spending, budgeting, and savings goals in one place.
 
-**Live**: [nice-desert-0837ea310.7.azurestaticapps.net](https://nice-desert-0837ea310.7.azurestaticapps.net)
-(frontend) · `paynexus-api.azurewebsites.net` (backend API)
+**V1** (payslip + tax regulation only, 3 agents) is live: [nice-desert-0837ea310.7.azurestaticapps.net](https://nice-desert-0837ea310.7.azurestaticapps.net)
+· `paynexus-api.azurewebsites.net` (backend API).
+**V2** (this branch, `v2-dev`) adds bank statements, budgeting, savings goals, and scenario
+planning — built, tested, and live-verified end to end, not yet deployed. Deliberately kept off
+`main` (which auto-deploys V1 to production on push) until it's ready to ship as a whole.
 
 ## Architecture
 
 Two things drive most of the design decisions below: **every number a user sees traces to a Python
-function, never an LLM's arithmetic** (tax slabs, deduction gaps, trends — computed once, quoted by
-whichever agent needs them), and **the server never sees plaintext financial data** — payslip and
-financial-profile rows are AES-256-GCM ciphertext end to end, encrypted/decrypted only in the browser.
+function, never an LLM's arithmetic** (tax slabs, deduction gaps, trends, overspending, goal
+progress — computed once, quoted by whichever agent needs them), and **the server never sees
+plaintext financial data** — payslip, financial-profile, bank-statement, goal, and budget rows are
+all AES-256-GCM ciphertext end to end, encrypted/decrypted only in the browser.
 
 ```mermaid
 graph LR
     User["Browser<br/>(React)"] <-->|ciphertext only| Backend
-    Backend["FastAPI +<br/>LangGraph Orchestrator"] --> Agents["3 Reasoning Agents<br/>Payslip · Regulatory · Nudge"]
+    Backend["FastAPI +<br/>LangGraph Orchestrator"] --> Agents["7 Reasoning Agents"]
     Agents --> OpenAI["OpenAI API"]
     Backend <--> DB[("PostgreSQL<br/>+ pgvector")]
 ```
 
-The Orchestrator (LangGraph `StateGraph`) reads each question and routes it to whichever of the three
-agents actually apply — a payslip question hits one agent, "which regime should I pick and how much would
-I save" might hit all three. Their responses get merged and shown together.
+The Orchestrator (LangGraph `StateGraph`) classifies each question and fans it out — in parallel —
+to whichever of the seven agents actually apply; a payslip question hits one agent, "which regime
+should I pick and how much would I save, and am I still on budget" might hit four. Requests that
+try to add/edit/delete saved data through chat (not a question, an instruction) are caught by a
+dedicated no-LLM capability-gap node instead of being silently misrouted or hallucinated as done.
 
 | Agent | Model | Job |
 |---|---|---|
 | Payslip Reasoning | GPT-4o | Explains a specific payslip's numbers — accuracy over cost, since a wrong tax figure directly misleads someone |
-| Regulatory Intelligence | Hybrid (GPT-4o-mini / local Ollama) | Answers rule/threshold questions, grounded in `rag_documents/` via pgvector retrieval — never sees the user's actual salary |
+| Regulatory Intelligence | Hybrid (GPT-4o-mini / local Ollama) | Rule/threshold questions, grounded in `rag_documents/` via pgvector retrieval — never sees the user's actual salary |
 | Savings Advisor (Nudge) | Hybrid | Cross-session pattern recognition — deduction headroom, trends, regime timing — using compressed session history |
+| SpendingAnalyser | Hybrid | Bank-statement transactions: category breakdowns, recurring merchants, the subscriptions-specific filter |
+| BudgetPlanner | Hybrid | Actual spend vs. saved per-category budget targets — period-prorated so a statement longer than a month doesn't falsely read as overspending |
+| GoalTracker | Hybrid | Savings-goal progress and whether the current pace hits a target date |
+| Foresight (What-If) | Hybrid | Explicit hypotheticals — "what if I switched regime / cut my budget by ₹1,000 / saved ₹500 more toward a goal" |
+
+A user never has to ask to be warned, either — client-side, no-LLM proactive alerts (ITR deadline,
+regime-declaration window, deduction headroom, stale payslip/statement, over-budget category,
+approaching goal deadline) surface unprompted as dismissible banners, dismissal scoped per-day per
+alert via `localStorage`.
 
 ## Deployment
 
 | Resource | What | Where |
 |---|---|---|
-| `paynexus-api` | FastAPI backend, Docker container | Azure App Service (Basic B1, `indiasouthcentral`) |
-| `paynexus-web` | React frontend | Azure Static Web Apps (Free tier) |
-| `paynexus-db-ramya` | PostgreSQL 16 + `pgvector` | Azure Database for PostgreSQL Flexible Server (Burstable B1MS) |
+| `paynexus-api` | FastAPI backend, Docker container (V1 only — V2 not deployed) | Azure App Service (Basic B1, `indiasouthcentral`) |
+| `paynexus-web` | React frontend (V1 only — V2 not deployed) | Azure Static Web Apps (Free tier) |
+| `paynexus-db-ramya` | PostgreSQL 16 + `pgvector`, separate `paynexus` (V1) / `paynexus_v2` databases on the same server | Azure Database for PostgreSQL Flexible Server (Burstable B1MS) |
 | `ramya192/paynexus-backend` | Backend container image | Docker Hub (free tier) |
 
-CI/CD: `.github/workflows/deploy.yml` — pushes to `main` build+push the backend image to Docker Hub (Azure's
-Continuous Deployment webhook then re-pulls it automatically) and build+deploy the frontend to Static Web
-Apps. Real ongoing cost: **~$34/month** (Postgres + App Service; Static Web Apps and Docker Hub are free),
-currently running against a $200 Azure free-trial credit with a hard spending limit (no card can be
-charged).
+CI/CD: `.github/workflows/deploy.yml` — pushes to `main` build+push the backend image to Docker Hub
+(Azure's Continuous Deployment webhook then re-pulls it automatically) and build+deploy the
+frontend to Static Web Apps. This is why V2's work stays on `v2-dev` until it's ready to ship as a
+whole — merging to `main` early would auto-deploy a partially-verified feature set to the same
+production resources V1 users are on. Real ongoing cost: **~$34/month** (Postgres + App Service;
+Static Web Apps and Docker Hub are free), currently running against a $200 Azure free-trial credit
+with a hard spending limit (no card can be charged).
+
+**Account Aggregator (AA) integration** — automatic bank-statement fetch via Setu/FinVu — was
+built and tested against both providers' real API contracts, then removed entirely rather than
+shipped unusable: both require FIU registration with RBI/SEBI/IRDAI (Setu additionally gates its
+KYC step on a GSTIN), a structural requirement for registered financial institutions that doesn't
+have a self-serve path for an individual developer. Bank statements are uploaded manually (CSV or
+PDF, parsed client-side/server-side with no AA dependency) instead — a known, defensible scope
+limitation, not a bug.
 
 ## Stack
 
@@ -56,42 +81,57 @@ charged).
 | Orchestration | LangGraph `StateGraph` | Typed state, conditional routing, parallel agent fan-out |
 | Frontend | React 19 + TypeScript + Vite | Current stable, fast dev loop |
 | Styling | Tailwind v4, CSS-first via `@theme` | No separate config file, current major version |
-| Frontend state | Zustand | Minimal boilerplate for chat/session state |
+| Frontend state | Zustand | One small store per concern (auth, chat, goals, budget, statements, alerts UI, …) |
 | Encryption | Client-side AES-256-GCM (PBKDF2-derived key) | Server never sees plaintext financial data |
 | Vector store | pgvector on the same Postgres instance | One database instead of a separate vector service |
-| LLM provider | OpenAI (GPT-4o / GPT-4o-mini), local Ollama fallback for two agents | Direct API access, existing paid plan |
+| LLM provider | OpenAI (GPT-4o / GPT-4o-mini), local Ollama fallback for hybrid agents | Direct API access, existing paid plan |
+| Statement ingestion | CSV parsed directly (no LLM); PDF text extracted client-side (pdfjs-dist) and structured via GPT-4o | The PDF itself never reaches the server, only extracted text does |
 
 ## Testing
 
-- **`backend/tests/`** — 106 pytest tests, zero setup (`cd backend && pytest`). 97 pure unit tests covering
-  every concrete bug this build found (tax slab math, deduction gaps, trends, compression, table dedup,
-  Ollama's markdown-fence JSON issue); 4 `@pytest.mark.integration` tests that hit the real OpenAI API.
+- **`backend/tests/`** — 265 pytest tests, zero setup (`cd backend && pytest`) — unit tests covering
+  every concrete bug this build found across both V1 and V2 (tax slab math, deduction gaps, trends,
+  compression, table dedup, budget period-proration, duplicate-transaction-ID disambiguation,
+  Ollama's markdown-fence JSON issue), plus `@pytest.mark.integration` tests that hit the real
+  OpenAI API.
 - **`backend/rag/eval.py`** — retrieval hit-rate@k, MRR, and generation keyword-coverage against a
   hand-verified ground-truth set. Current: 94% hit-rate, 0.853 MRR, 100% keyword coverage.
-- **`backend/agent_eval/eval.py`** — the same keyword-coverage approach for the Payslip/Nudge agents'
-  actual narrated answers, plus forbidden-phrase checks for this build's recurring failure mode (a
-  confidently *wrong* conclusion stated despite correct numbers in the same prompt).
-- **`backend/compression/eval.py`** — real before/after token-cost measurement for context compression.
-- **`.claude/skills/run-paynexus/`** — the agent-facing runbook: direct Python invocation, `curl` recipes,
-  and a Playwright driver (`driver.mjs`) that can target either localhost or the real deployed URLs.
+- **`backend/agent_eval/eval.py`** — the same keyword-coverage approach for narrated agent answers,
+  plus forbidden-phrase checks for this build's recurring failure mode (a confidently *wrong*
+  conclusion stated despite correct numbers in the same prompt).
+- **`backend/compression/eval.py`** — real before/after token-cost measurement for context
+  compression (Level 1 in-session sliding window, Level 2 cross-session summarization).
+- **`.claude/skills/run-paynexus/`** — the agent-facing runbook: direct Python invocation, `curl`
+  recipes, and Playwright drivers (`driver.mjs` for V1's flow, `v2_flows_driver.mjs` +
+  `v2_flows_driver_part2.mjs` for V2's — registration through every CRUD flow, proactive alerts,
+  the subscriptions filter, capability-gap responses, and cross-session memory, verified against
+  the real network request, not LLM wording).
 
 ## Layout
 
 ```
-paynexus/
+paynexus-v2/
 ├── backend/
-│   ├── agents/        LangGraph orchestrator + 3 reasoning agents
-│   ├── agent_eval/     answer-quality eval for Payslip/Nudge agents
-│   ├── rag/            retriever, index builder, eval harness
-│   ├── compression/    context compression + its eval harness
-│   ├── tests/           106 pytest tests
-│   ├── alembic/        migrations — alembic upgrade head before first run
-│   ├── Dockerfile       real, tested container for App Service
-│   └── ...              FastAPI app, DB models, security, tax computation modules
-├── frontend/            React 19 + TypeScript + Tailwind v4 (Vite)
-├── rag_documents/       10/10 Indian tax-law source docs embedded into pgvector
+│   ├── agents/          LangGraph orchestrator + 7 reasoning agents
+│   ├── agent_eval/       answer-quality eval harness
+│   ├── analytics/        spending trends, recurring-merchant/subscriptions detection
+│   ├── budgeting/        budget vs. actual-spend checks
+│   ├── categorization/   rule-based transaction categorization (+ LLM fallback)
+│   ├── ingestion/        CSV statement parsing
+│   ├── rag/              retriever, index builder, eval harness
+│   ├── compression/      context compression + its eval harness
+│   ├── security/         auth, password hashing
+│   ├── db/                SQLAlchemy models, session handling
+│   ├── tests/             265 pytest tests
+│   ├── alembic/          migrations — alembic upgrade head before first run
+│   ├── Dockerfile         real, tested container for App Service
+│   └── ...                FastAPI app, statement/payslip extraction, tax computation modules
+├── frontend/              React 19 + TypeScript + Tailwind v4 (Vite)
+│   └── src/components/    Auth, Dashboard (tabs), Chat, ChatWidget, Alerts, GoalTracker,
+│                          BudgetPlanner, StatementUploader, PayslipUploader, FinancialProfile
+├── rag_documents/         Indian tax-law source docs embedded into pgvector
 ├── .claude/skills/run-paynexus/   agent-facing runbook — direct invocation, curl, Playwright
-└── .github/workflows/    CI/CD to Azure (Docker Hub + Static Web Apps)
+└── .github/workflows/     CI/CD to Azure (Docker Hub + Static Web Apps) — watches `main` only
 ```
 
 ## Quick start
