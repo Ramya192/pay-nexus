@@ -69,7 +69,10 @@ function fmtDate(d) {
 }
 
 async function askChat(query) {
-  const input = page.locator('input[placeholder="Why did my take-home drop this month?"]');
+  // Scoped to the form containing the "Ask" button rather than matching the
+  // input's placeholder text -- the placeholder is just UI copy (changed at
+  // least once already) and shouldn't be load-bearing for a selector.
+  const input = page.locator("form", { has: page.locator('button:has-text("Ask")') }).locator("input");
   await input.fill(query);
   await page.click('button:has-text("Ask")');
   // "Ask" re-disables while sending, re-enables when the stream finishes —

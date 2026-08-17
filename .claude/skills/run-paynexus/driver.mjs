@@ -99,7 +99,13 @@ try {
   await shot(page, "03-payslip-entered");
 
   console.log("--- ask a question ---");
-  await page.fill('input[placeholder*="take-home"]', "Why did my take-home drop this month?");
+  // Scoped to the form containing the "Ask" button rather than matching the
+  // input's placeholder text -- the placeholder is just UI copy and
+  // shouldn't be load-bearing for a selector (it's changed at least once).
+  await page
+    .locator("form", { has: page.locator('button:has-text("Ask")') })
+    .locator("input")
+    .fill("Why did my take-home drop this month?");
   await page.click('button:has-text("Ask")');
 
   // The agent indicator can resolve before this poll ever catches it —
