@@ -18,7 +18,9 @@ node's single LLM call (agents/llm_metrics.py), merged into
 PayNexusState.token_usage by the assembler.
 """
 
-from agents.llm import hybrid_complete
+import asyncio
+
+from agents.agent_framework_llm import hybrid_agent_complete_text
 from agents.state import PayNexusState
 from config import config
 from rag.retriever import retrieve_with_scores
@@ -64,8 +66,10 @@ def regulatory_agent_node(state: PayNexusState) -> dict:
         f"[source: {doc.metadata.get('source', 'unknown')}]\n{doc.page_content}" for doc, _ in results
     )
     user_prompt = f"Retrieved regulatory context:\n{context}\n\nQuestion: {query}"
-    answer, metrics = hybrid_complete(
-        _SYSTEM_PROMPT, user_prompt, model=config.REGULATORY_AGENT_MODEL, agent="regulatory_agent"
+    answer, metrics = asyncio.run(
+        hybrid_agent_complete_text(
+            _SYSTEM_PROMPT, user_prompt, model=config.REGULATORY_AGENT_MODEL, agent="regulatory_agent"
+        )
     )
 
     return {

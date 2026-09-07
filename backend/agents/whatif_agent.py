@@ -27,13 +27,13 @@ was asked about but there's no data to compute against (still handled with
 an honest, plain sentence, not a None-shaped silence).
 """
 
+import asyncio
 import json
-import time
 
-from openai import OpenAI
+from pydantic import BaseModel
 
+from agents.agent_framework_llm import agent_complete
 from agents.conversation import format_conversation_for_prompt
-from agents.llm_metrics import record_from_response
 from agents.state import PayNexusState
 from agents.tables import resolve_selected_tables
 from analytics.goal_progress import (
@@ -54,7 +54,17 @@ from tax_slabs import (
 )
 from whatif_extraction import extract_scenario, has_any_signal
 
-_client = OpenAI(api_key=config.OPENAI_API_KEY)
+
+class WhatIfAgentResponse(BaseModel):
+    """See agents/agent_framework_llm.py's module docstring. Covers only
+    this node's own final narration call; whatif_extraction.py's separate
+    one-shot extract_scenario() call is a helper module, not one of the
+    orchestrator's 7 agent nodes — left on its existing direct-OpenAI path
+    for now, a future cleanup candidate."""
+
+    explanation: str
+    tables: list[str] = []
+    follow_up_suggestions: list[str] = []
 
 _SYSTEM_PROMPT = """You are the Foresight Agent inside PayNexus, an Indian personal finance \
 assistant — you explore hypothetical "what if" scenarios. You are given one or more computed \
@@ -131,20 +141,15 @@ def whatif_agent_node(state: PayNexusState) -> dict:
     prompt_parts.append(f"Question: {state['user_query']}")
     user_prompt = "\n\n".join(prompt_parts)
 
-    start = time.perf_counter()
-    response = _client.chat.completions.create(
-        model=config.WHATIF_AGENT_MODEL,
-        messages=[
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ],
-        response_format={"type": "json_object"},
+    raw, metrics = asyncio.run(
+        agent_complete(
+            _SYSTEM_PROMPT,
+            user_prompt,
+            model=config.WHATIF_AGENT_MODEL,
+            response_model=WhatIfAgentResponse,
+            agent="whatif_agent",
+        )
     )
-    latency_ms = (time.perf_counter() - start) * 1000
-    metrics = record_from_response(
-        agent="whatif_agent", model=config.WHATIF_AGENT_MODEL, response=response, latency_ms=latency_ms
-    )
-    raw = response.choices[0].message.content or "{}"
     return {
         "scenario_response": raw,
         "scenario_tables": resolve_selected_tables(raw, available_tables),

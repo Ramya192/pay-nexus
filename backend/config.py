@@ -18,6 +18,19 @@ class Config:
     USE_LOCAL_SLM: bool = os.getenv("USE_LOCAL_SLM", "False") == "True"
     OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
+    # --- Azure AI Foundry ---
+    # paynexus-foundry account, paynexus-v21 project. Foundry only has two
+    # model deployments provisioned so far — "gpt-4o" and "gpt-4.1-mini" —
+    # not one deployment per *_AGENT_MODEL name above. FOUNDRY_DEPLOYMENT_MAP
+    # is an interim mapping from this file's existing OpenAI model names to
+    # the Foundry deployment that actually serves that tier; a real
+    # per-agent deployment-name scheme is future work, not done here.
+    FOUNDRY_PROJECT_ENDPOINT: str = os.getenv("FOUNDRY_PROJECT_ENDPOINT", "")
+    FOUNDRY_DEPLOYMENT_MAP: dict[str, str] = {
+        "gpt-4o": "gpt-4o",
+        "gpt-4o-mini": "gpt-4.1-mini",
+    }
+
     PAYSLIP_AGENT_MODEL: str = "gpt-4o"           # always cloud — accuracy critical
     REGULATORY_AGENT_MODEL: str = "gpt-4o-mini"   # or phi4-mini via Ollama toggle
     NUDGE_AGENT_MODEL: str = "gpt-4o-mini"        # or phi4-mini via Ollama toggle
