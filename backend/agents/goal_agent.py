@@ -19,13 +19,26 @@ instrument-type field on a goal yet and no price-lookup source wired in.
 Every goal is treated as a flat cash target for now.
 """
 
+import asyncio
+
+from pydantic import BaseModel
+
+from agents.agent_framework_llm import hybrid_agent_complete
 from agents.conversation import format_conversation_for_prompt
-from agents.llm import hybrid_complete
 from agents.state import PayNexusState
 from agents.tables import resolve_selected_tables
 from analytics.goal_progress import format_goals_for_prompt, goal_progress_table
 from analytics.spending_trends import average_monthly_net_savings
 from config import config
+
+
+class GoalAgentResponse(BaseModel):
+    """See agents/agent_framework_llm.py's module docstring and
+    agents/budget_agent.py's identical pattern."""
+
+    explanation: str
+    tables: list[str] = []
+    follow_up_suggestions: list[str] = []
 
 _SYSTEM_PROMPT = """You are the GoalTracker Agent inside PayNexus, an Indian personal finance \
 assistant. You are given one user's actual savings goals (Trip, Home Loan, Education, Emergency \
@@ -97,8 +110,14 @@ def goal_agent_node(state: PayNexusState) -> dict:
     prompt_parts.append(f"Question: {state['user_query']}")
     user_prompt = "\n\n".join(prompt_parts)
 
-    answer, metrics = hybrid_complete(
-        _SYSTEM_PROMPT, user_prompt, model=config.GOAL_AGENT_MODEL, json_mode=True, agent="goal_agent"
+    answer, metrics = asyncio.run(
+        hybrid_agent_complete(
+            _SYSTEM_PROMPT,
+            user_prompt,
+            model=config.GOAL_AGENT_MODEL,
+            response_model=GoalAgentResponse,
+            agent="goal_agent",
+        )
     )
     return {
         "goal_response": answer,

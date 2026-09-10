@@ -27,12 +27,12 @@ analytics/spending_trends.py's module docstring for why grouping this way
 instead of by calendar month matters for a real statement.
 """
 
-import time
+import asyncio
 
-from openai import OpenAI
+from pydantic import BaseModel
 
+from agents.agent_framework_llm import agent_complete
 from agents.conversation import format_conversation_for_prompt
-from agents.llm_metrics import record_from_response
 from agents.state import PayNexusState
 from agents.tables import resolve_selected_tables
 from analytics.recurring import recurring_merchants_table, subscriptions_table
@@ -44,7 +44,14 @@ from analytics.spending_trends import (
 )
 from config import config
 
-_client = OpenAI(api_key=config.OPENAI_API_KEY)
+
+class SpendingAgentResponse(BaseModel):
+    """See agents/agent_framework_llm.py's module docstring. Always cloud
+    — same tier as payslip_agent, no Ollama toggle."""
+
+    explanation: str
+    tables: list[str] = []
+    follow_up_suggestions: list[str] = []
 
 _SYSTEM_PROMPT = """You are the SpendingAnalyser Agent inside PayNexus, an Indian personal \
 finance assistant. You are given one user's actual categorized bank transactions (from their \
@@ -141,20 +148,15 @@ def spending_agent_node(state: PayNexusState) -> dict:
     prompt_parts.append(f"Question: {state['user_query']}")
     user_prompt = "\n\n".join(prompt_parts)
 
-    start = time.perf_counter()
-    response = _client.chat.completions.create(
-        model=config.SPENDING_AGENT_MODEL,
-        messages=[
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ],
-        response_format={"type": "json_object"},
+    raw, metrics = asyncio.run(
+        agent_complete(
+            _SYSTEM_PROMPT,
+            user_prompt,
+            model=config.SPENDING_AGENT_MODEL,
+            response_model=SpendingAgentResponse,
+            agent="spending_agent",
+        )
     )
-    latency_ms = (time.perf_counter() - start) * 1000
-    metrics = record_from_response(
-        agent="spending_agent", model=config.SPENDING_AGENT_MODEL, response=response, latency_ms=latency_ms
-    )
-    raw = response.choices[0].message.content or "{}"
     return {
         "spending_response": raw,
         "spending_tables": resolve_selected_tables(raw, available_tables),

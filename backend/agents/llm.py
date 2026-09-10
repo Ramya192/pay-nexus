@@ -1,65 +1,28 @@
 """
-Hybrid inference for the two agents the doc marks eligible for the local-SLM
-toggle — Regulatory (Agent 2) and Nudge (Agent 3). Routes to GPT-4o-mini or
-local Ollama phi4-mini depending on USE_LOCAL_SLM, falling back to
-GPT-4o-mini automatically (with a warning log) if Ollama isn't reachable.
-See PROJECT_CONTEXT.md §7.
+Local-SLM (Ollama) inference path, kept for the GPT-4o-mini/Ollama hybrid
+toggle (USE_LOCAL_SLM) still used by budget_agent/goal_agent/nudge_agent/
+regulatory_agent. See PROJECT_CONTEXT.md §7.
 
-Payslip Reasoning (Agent 1) and the Orchestrator's own intent-classification
-call always use OpenAI directly and don't go through this module — see
-agents/payslip_agent.py and agents/orchestrator.py.
+The CLOUD half of that hybrid toggle — and every direct-OpenAI agent — moved
+to Agent Framework + Azure AI Foundry (agents/agent_framework_llm.py — see
+that module's docstring for why Ollama specifically stayed on this
+separate, unchanged path rather than also moving to Agent Framework:
+there's no first-party Ollama chat client in the installed agent_framework
+packages, and this module's own documented quirks below aren't worth
+risking on a path that's off by default anyway). This module used to also
+own the cloud path itself (hybrid_complete/_openai_complete, a direct
+openai.OpenAI client) — removed once agent_framework_llm.hybrid_agent_complete
+became the only real caller of the cloud half; that history is in git log
+if it's ever needed again.
 """
 
 import logging
 import time
 
-from openai import OpenAI
-
-from agents.llm_metrics import LLMCallMetrics, record_from_response, record_manual
+from agents.llm_metrics import LLMCallMetrics, record_manual
 from config import config
 
 logger = logging.getLogger(__name__)
-_openai_client = OpenAI(api_key=config.OPENAI_API_KEY)
-
-
-def hybrid_complete(
-    system_prompt: str, user_prompt: str, model: str, json_mode: bool = False, agent: str = "unknown"
-) -> tuple[str, LLMCallMetrics]:
-    """Complete a single-turn prompt on whichever backend USE_LOCAL_SLM
-    selects. `model` is the OpenAI model to use when running cloud, or as
-    the fallback if the local path fails — e.g. config.REGULATORY_AGENT_MODEL.
-    `agent` names the caller for metrics purposes (e.g. "nudge_agent") —
-    see agents/llm_metrics.py.
-
-    `json_mode`: OpenAI gets a hard guarantee (`response_format=json_object`).
-    Ollama's plain completion wrapper has no equivalent, so it only gets an
-    appended instruction — best-effort, not enforced, and confirmed to
-    actually matter with a real call: phi4-mini reliably wraps its answer
-    in a ```json fence (stripped in _try_ollama — see
-    _strip_markdown_fence) and has been observed emitting invalid JSON
-    inside it too (inline `//` comments, an object where a plain string was
-    asked for). The fence gets stripped; the rest doesn't get "fixed" — a
-    caller parsing this path's output needs the same try/except around
-    json.loads() every OpenAI JSON-mode caller already has, and shouldn't
-    assume Ollama JSON mode is equivalent to OpenAI's. A caller that needs
-    an actual guarantee would need to switch to langchain_ollama's
-    ChatOllama with `format="json"` instead of this module's plain-text
-    OllamaLLM wrapper — not done here since USE_LOCAL_SLM is off by default
-    and this is a real, tested limitation to know about, not yet a reason
-    to rearchitect this module.
-
-    Returns (text, metrics) — every caller now gets exact token/cost data
-    alongside the answer, not just the answer; see agents/llm_metrics.py's
-    module docstring for why this didn't exist until a user asked how
-    LLM-call cost was being measured at all.
-    """
-    if config.USE_LOCAL_SLM:
-        local_result = _try_ollama(system_prompt, user_prompt, json_mode, agent)
-        if local_result is not None:
-            return local_result
-        logger.warning("Ollama unavailable at %s — falling back to %s.", config.OLLAMA_BASE_URL, model)
-
-    return _openai_complete(system_prompt, user_prompt, model, json_mode, agent)
 
 
 def _try_ollama(
@@ -116,25 +79,3 @@ def _strip_markdown_fence(text: str) -> str:
         if stripped.rstrip().endswith("```"):
             stripped = stripped.rstrip()[: -len("```")]
     return stripped.strip()
-
-
-def _openai_complete(
-    system_prompt: str, user_prompt: str, model: str, json_mode: bool, agent: str
-) -> tuple[str, LLMCallMetrics]:
-    # OpenAI's automatic prompt caching kicks in on its own for prompts over
-    # ~1024 tokens with a stable prefix — not something this app toggles or
-    # needs to flag per-call, as long as the system prompt stays
-    # byte-identical across calls, which every caller of this function
-    # already does.
-    start = time.perf_counter()
-    response = _openai_client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        response_format={"type": "json_object"} if json_mode else None,
-    )
-    latency_ms = (time.perf_counter() - start) * 1000
-    metrics = record_from_response(agent=agent, model=model, response=response, latency_ms=latency_ms)
-    return response.choices[0].message.content or "", metrics

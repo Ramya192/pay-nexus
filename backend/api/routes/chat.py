@@ -1,20 +1,24 @@
 """
-POST /chat — the main endpoint (PROJECT_CONTEXT.md §9). Runs the LangGraph
-orchestrator and streams progress as it goes, via Server-Sent Events, so the
-frontend's agent indicator ("Payslip Agent reasoning...", §10) can update in
-real time as each LangGraph node actually completes — driven by
-stream_mode="updates", not simulated.
+POST /chat — the main endpoint (PROJECT_CONTEXT.md §9). Runs the Agent
+Framework orchestrator (agents/orchestrator_v2.py — ConcurrentBuilder-based,
+replacing the original LangGraph StateGraph) and streams progress as it
+goes, via Server-Sent Events, so the frontend's agent indicator ("Payslip
+Agent reasoning...", §10) can update in real time as each agent actually
+finishes — driven by stream_paynexus_workflow()'s own real Workflow event
+stream, not simulated. The SSE contract itself (event names/fields) is
+unchanged from the original LangGraph-based route; only what produces
+those events changed.
 """
 
 import json
 import logging
-from collections.abc import Generator
+from collections.abc import AsyncGenerator
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
 from agents.llm_metrics import summarize as summarize_metrics
-from agents.orchestrator import paynexus_graph
+from agents.orchestrator_v2 import stream_paynexus_workflow
 from api.models.chat import ChatRequest, SummarizeRequest, SummarizeResponse
 from compression.context_compressor import compress_session_summary
 from db.models import User
@@ -25,7 +29,7 @@ router = APIRouter(tags=["chat"])
 
 
 @router.post("/chat")
-def chat(body: ChatRequest, user: User = Depends(get_current_user)) -> StreamingResponse:
+async def chat(body: ChatRequest, user: User = Depends(get_current_user)) -> StreamingResponse:
     initial_state = {
         "user_query": body.query,
         "payslip_data": body.payslip_data or {},
@@ -38,7 +42,7 @@ def chat(body: ChatRequest, user: User = Depends(get_current_user)) -> Streaming
         "budgets": body.budgets or {},
         "user_id": user.id,
     }
-    return StreamingResponse(_stream_graph(initial_state), media_type="text/event-stream")
+    return StreamingResponse(_stream_workflow(initial_state), media_type="text/event-stream")
 
 
 @router.post("/chat/summarize", response_model=SummarizeResponse)
@@ -55,31 +59,32 @@ def summarize(body: SummarizeRequest, _user: User = Depends(get_current_user)) -
     )
 
 
-def _stream_graph(initial_state: dict) -> Generator[str, None, None]:
-    """One SSE `data:` line per LangGraph node completion. The frontend
-    watches for `{"event": "agent_active", "agent": ...}` to drive the
-    agent indicator, and a closing `{"event": "final", ...}` with the
-    assembled response."""
+async def _stream_workflow(initial_state: dict) -> AsyncGenerator[str, None]:
+    """One SSE `data:` line per agent completion. The frontend watches for
+    `{"event": "agent_active", "agent": ...}` to drive the agent indicator,
+    and a closing `{"event": "final", ...}` with the assembled response —
+    identical contract to the original LangGraph-based route; only the
+    generator underneath (stream_paynexus_workflow, agents/orchestrator_v2.py)
+    changed."""
     try:
-        for step in paynexus_graph.stream(initial_state, stream_mode="updates"):
-            for node_name, node_update in step.items():
-                if node_name == "assembler":
-                    yield _sse(
-                        {
-                            "event": "final",
-                            "response": node_update.get("final_response", ""),
-                            "active_agent": node_update.get("active_agent", ""),
-                            "nudge": node_update.get("nudge_card"),
-                            "tables": node_update.get("tables") or [],
-                            "token_usage": node_update.get("token_usage") or {},
-                        }
-                    )
-                elif node_name != "orchestrator":
-                    yield _sse({"event": "agent_active", "agent": node_name})
+        async for event in stream_paynexus_workflow(initial_state):
+            if event["kind"] == "final":
+                yield _sse(
+                    {
+                        "event": "final",
+                        "response": event.get("final_response", ""),
+                        "active_agent": event.get("active_agent", ""),
+                        "nudge": event.get("nudge_card"),
+                        "tables": event.get("tables") or [],
+                        "token_usage": event.get("token_usage") or {},
+                    }
+                )
+            else:
+                yield _sse({"event": "agent_active", "agent": event["agent"]})
     except Exception:
         # Graceful fallback (§4) — an agent failing shouldn't leak a raw
         # traceback to the client; log it server-side instead.
-        logger.exception("paynexus_graph.stream failed")
+        logger.exception("stream_paynexus_workflow failed")
         yield _sse({"event": "error", "detail": "Something went wrong reasoning over that question."})
 
 

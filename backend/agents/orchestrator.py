@@ -1,9 +1,19 @@
 """
-Agent 4 — Orchestrator. LangGraph StateGraph: classifies intent, compresses
-session history, fans the query out to whichever of the three reasoning
-agents it needs (in parallel), then merges their outputs at the assembler
-node. See PROJECT_CONTEXT.md §8 for the state shape and graph sketch this
-implements, and §11 for where this fits (backend/agents/orchestrator.py).
+Pure-Python pieces reused by agents/orchestrator_v2.py — the intent
+classifier's system prompt, the capability-gap message, and the
+assembler's merge/formatting logic. All of it is zero-LLM Python (except
+the prompt string itself, which orchestrator_v2.py's own Agent Framework
+classifier calls), unrelated to *how* the agents that feed it actually
+run, so none of it needed reimplementing when the orchestration mechanism
+(LangGraph -> Microsoft Agent Framework's ConcurrentBuilder) changed. See
+PROJECT_CONTEXT.md §8/§11 for the state shape this operates on.
+
+This module used to also own the LangGraph StateGraph itself
+(orchestrator_node/route_to_agents/build_graph/paynexus_graph) — removed
+once api/routes/chat.py no longer imported any of it
+(orchestrator_v2.py's stream_paynexus_workflow/run_paynexus_workflow are
+the real entry points now). That history is in git log if it's ever needed
+again, not preserved here.
 
 Exercised extensively end-to-end against real Postgres/OpenAI credentials
 across many rounds of manual and Playwright-driven testing — see README.md
@@ -11,28 +21,9 @@ for the dated log of bugs found and fixed that way.
 """
 
 import json
-import logging
-import time
 
-from langgraph.graph import END, StateGraph
-from openai import OpenAI
-
-from agents.budget_agent import budget_agent_node
-from agents.conversation import format_conversation_for_prompt
-from agents.goal_agent import goal_agent_node
-from agents.llm_metrics import record_from_response
 from agents.llm_metrics import summarize as summarize_metrics
-from agents.nudge_agent import nudge_agent_node
-from agents.payslip_agent import payslip_agent_node
-from agents.regulatory_agent import regulatory_agent_node
-from agents.spending_agent import spending_agent_node
 from agents.state import PayNexusState
-from agents.whatif_agent import whatif_agent_node
-from compression.context_compressor import cap_session_history, compress_in_session
-from config import config
-
-logger = logging.getLogger(__name__)
-_client = OpenAI(api_key=config.OPENAI_API_KEY)
 
 _INTENT_SYSTEM_PROMPT = """Classify a PayNexus user question by which agents must answer it. \
 Agents: "payslip" (explaining THIS ONE active payslip — pay changes, HRA/TDS/regime math for the \
@@ -119,75 +110,6 @@ still a regime question (payslip, possibly plus nudge) — not a brand-new nudge
 
 Respond with JSON: {"agents": ["payslip"|"regulatory"|"nudge"|"spending"|"goal"|"budget"|"whatif"|"unsupported", ...]}."""
 
-_AGENT_KEY_TO_NODE = {
-    "payslip": "payslip_agent",
-    "regulatory": "regulatory_agent",
-    "nudge": "nudge_agent",
-    "spending": "spending_agent",
-    "goal": "goal_agent",
-    "budget": "budget_agent",
-    "whatif": "whatif_agent",
-    "unsupported": "capability_gap_node",
-}
-_ALL_AGENT_NODES = list(_AGENT_KEY_TO_NODE.values())
-
-
-def orchestrator_node(state: PayNexusState) -> dict:
-    """Classifies intent — using this session's recent conversation to
-    resolve follow-ups, not just the new message in isolation — and, if
-    enabled, applies Level 1 sliding-window compression (§6) to that same
-    conversation before any agent sees it. (Previously this compression
-    was applied to session_history — the cross-session summaries — by
-    mistake; §6 always meant it for live in-session exchanges, which is
-    what `conversation` is.) Also caps how many past session summaries
-    stay in play (cap_session_history) — GET /payslip/history returns
-    every summary a user has ever had with no limit, so without this,
-    session_history grows every session, forever. Three things the
-    Orchestrator does before fan-out (§4)."""
-    conversation = state.get("conversation") or []
-    if config.ENABLE_CONTEXT_COMPRESSION and conversation:
-        conversation = compress_in_session(conversation)
-
-    session_history = cap_session_history(state.get("session_history") or [])
-
-    classifier_input = state["user_query"]
-    conversation_block = format_conversation_for_prompt(conversation)
-    if conversation_block:
-        classifier_input = f"{conversation_block}\n\nNew question: {state['user_query']}"
-
-    start = time.perf_counter()
-    response = _client.chat.completions.create(
-        model=config.ORCHESTRATOR_MODEL,
-        messages=[
-            {"role": "system", "content": _INTENT_SYSTEM_PROMPT},
-            {"role": "user", "content": classifier_input},
-        ],
-        response_format={"type": "json_object"},
-    )
-    latency_ms = (time.perf_counter() - start) * 1000
-    metrics = record_from_response(
-        agent="orchestrator_classifier", model=config.ORCHESTRATOR_MODEL, response=response, latency_ms=latency_ms
-    )
-
-    agent_keys: list[str] = []
-    try:
-        parsed = json.loads(response.choices[0].message.content or "{}")
-        agent_keys = [a for a in parsed.get("agents", []) if a in _AGENT_KEY_TO_NODE]
-    except (json.JSONDecodeError, TypeError, AttributeError):
-        pass
-
-    if not agent_keys:
-        logger.warning("Intent classification returned nothing usable — defaulting to payslip agent.")
-        agent_keys = ["payslip"]
-
-    return {
-        "intent": "multi" if len(agent_keys) > 1 else agent_keys[0],
-        "agents_to_invoke": [_AGENT_KEY_TO_NODE[k] for k in agent_keys],
-        "conversation": conversation,
-        "session_history": session_history,
-        "orchestrator_llm_calls": [metrics],
-    }
-
 
 def capability_gap_node(state: PayNexusState) -> dict:
     """Handles requests none of the three reasoning agents can act on —
@@ -219,14 +141,6 @@ def capability_gap_node(state: PayNexusState) -> dict:
             "directly on its own tab."
         )
     }
-
-
-def route_to_agents(state: PayNexusState) -> list[str]:
-    """Conditional edge: fans out to every agent the orchestrator selected,
-    in parallel. LangGraph runs each returned node in the same super-step
-    and holds the shared downstream node (assembler) until all of them
-    finish — standard fan-out/fan-in, no extra join logic needed here."""
-    return state.get("agents_to_invoke") or ["payslip_agent"]
 
 
 def _format_agent_response(raw: str) -> str:
@@ -370,8 +284,8 @@ def assembler_node(state: PayNexusState) -> dict:
 
     # Every LLM call this turn actually made, aggregated — see
     # agents/llm_metrics.py. orchestrator_llm_calls is always present (the
-    # intent classifier runs every turn); the other three only when that
-    # agent actually ran, per route_to_agents' fan-out.
+    # intent classifier runs every turn, from orchestrator_v2.classify_intent
+    # — see that module); the other seven only when that agent actually ran.
     all_calls = (
         (state.get("orchestrator_llm_calls") or [])
         + (state.get("payslip_llm_calls") or [])
@@ -390,30 +304,3 @@ def assembler_node(state: PayNexusState) -> dict:
         "tables": tables,
         "token_usage": summarize_metrics(all_calls),
     }
-
-
-def build_graph():
-    graph = StateGraph(PayNexusState)
-    graph.add_node("orchestrator", orchestrator_node)
-    graph.add_node("payslip_agent", payslip_agent_node)
-    graph.add_node("regulatory_agent", regulatory_agent_node)
-    graph.add_node("nudge_agent", nudge_agent_node)
-    graph.add_node("spending_agent", spending_agent_node)
-    graph.add_node("goal_agent", goal_agent_node)
-    graph.add_node("budget_agent", budget_agent_node)
-    graph.add_node("whatif_agent", whatif_agent_node)
-    graph.add_node("capability_gap_node", capability_gap_node)
-    graph.add_node("assembler", assembler_node)
-
-    graph.set_entry_point("orchestrator")
-    graph.add_conditional_edges("orchestrator", route_to_agents, _ALL_AGENT_NODES)
-    for agent_node in _ALL_AGENT_NODES:
-        graph.add_edge(agent_node, "assembler")
-    graph.add_edge("assembler", END)
-
-    return graph.compile()
-
-
-# Compiled once at import time — the API layer (Phase 4) imports this
-# directly: `from agents.orchestrator import paynexus_graph`.
-paynexus_graph = build_graph()

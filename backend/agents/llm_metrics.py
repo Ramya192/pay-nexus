@@ -30,6 +30,7 @@ PRICING_AS_OF = "2026-01 — verify against platform.openai.com/pricing before r
 _PRICING_USD_PER_1M: dict[str, tuple[float, float]] = {
     "gpt-4o": (2.50, 10.00),
     "gpt-4o-mini": (0.15, 0.60),
+    "gpt-4.1-mini": (0.40, 1.60),  # Foundry's mini-tier deployment, V2.1 migration
     "text-embedding-3-small": (0.02, 0.0),
     "phi4-mini": (0.0, 0.0),  # local via Ollama — no per-token API cost
 }
@@ -69,6 +70,26 @@ def record_from_response(agent: str, model: str, response, latency_ms: float) ->
     usage = getattr(response, "usage", None)
     input_tokens = getattr(usage, "prompt_tokens", 0) or 0
     output_tokens = getattr(usage, "completion_tokens", 0) or 0
+    return LLMCallMetrics(
+        agent=agent,
+        model=model,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cost_usd=compute_cost_usd(model, input_tokens, output_tokens),
+        latency_ms=latency_ms,
+    )
+
+
+def record_from_agent_response(agent: str, model: str, response, latency_ms: float) -> LLMCallMetrics:
+    """Same as record_from_response(), but for an Agent Framework
+    `AgentResponse` (V2.1 migration) instead of a raw OpenAI ChatCompletion —
+    the exact counts live in `response.usage_details` (a `UsageDetails`
+    TypedDict: input_token_count/output_token_count) rather than `.usage`.
+    Falls back to 0 the same way record_from_response() does when usage is
+    unavailable, rather than raising."""
+    usage = getattr(response, "usage_details", None)
+    input_tokens = (usage.get("input_token_count") if usage else 0) or 0
+    output_tokens = (usage.get("output_token_count") if usage else 0) or 0
     return LLMCallMetrics(
         agent=agent,
         model=model,
