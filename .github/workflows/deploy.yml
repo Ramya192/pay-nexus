@@ -23,19 +23,24 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      # A placeholder, not a real secret — several modules construct an
-      # OpenAI(api_key=...) client at import time (compression/
-      # context_compressor.py, whatif_extraction.py), and the openai SDK
-      # treats an empty-string key as "missing" and raises immediately,
-      # before pytest even collects a single test. A real key was never
-      # needed here (found the hard way: this crashed test collection the
-      # first time this workflow ran) — just something non-empty. Explicit
+      # Placeholders, not real secrets — several modules do real work at
+      # import time: compression/context_compressor.py and
+      # whatif_extraction.py construct an OpenAI(api_key=...) client (the
+      # SDK treats an empty-string key as "missing" and raises
+      # immediately), and db/database.py calls create_engine(DATABASE_URL)
+      # (SQLAlchemy needs a syntactically valid URL to even construct the
+      # engine, though it's lazy about actually connecting — route-level
+      # tests override the DB dependency with in-memory SQLite, so this
+      # fake Postgres URL is never actually connected to). Both crashed
+      # test collection the first two times this workflow ran, found and
+      # fixed one at a time rather than assumed away. Explicit
       # -m "not integration" is the actual gate that keeps real-API tests
       # from running, rather than relying on "is a key present" as a proxy
-      # for that, which a placeholder key would otherwise defeat.
+      # for that, which the OPENAI_API_KEY placeholder would otherwise defeat.
       - run: pytest -m "not integration"
         env:
           OPENAI_API_KEY: "sk-ci-placeholder-not-a-real-key"
+          DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci_placeholder"
 
   deploy-backend:
     needs: test-backend
