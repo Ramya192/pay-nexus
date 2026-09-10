@@ -23,12 +23,19 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      # No secrets needed here — @pytest.mark.integration tests (the ones
-      # that hit a real OpenAI/Foundry API or a live pgvector index) are
-      # auto-skipped whenever OPENAI_API_KEY isn't set (tests/conftest.py),
-      # which it deliberately isn't in this job. Everything that runs here
-      # is the free, deterministic unit-test tier.
-      - run: pytest
+      # A placeholder, not a real secret — several modules construct an
+      # OpenAI(api_key=...) client at import time (compression/
+      # context_compressor.py, whatif_extraction.py), and the openai SDK
+      # treats an empty-string key as "missing" and raises immediately,
+      # before pytest even collects a single test. A real key was never
+      # needed here (found the hard way: this crashed test collection the
+      # first time this workflow ran) — just something non-empty. Explicit
+      # -m "not integration" is the actual gate that keeps real-API tests
+      # from running, rather than relying on "is a key present" as a proxy
+      # for that, which a placeholder key would otherwise defeat.
+      - run: pytest -m "not integration"
+        env:
+          OPENAI_API_KEY: "sk-ci-placeholder-not-a-real-key"
 
   deploy-backend:
     needs: test-backend
