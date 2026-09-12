@@ -26,6 +26,31 @@ class Config:
     # the Foundry deployment that actually serves that tier; a real
     # per-agent deployment-name scheme is future work, not done here.
     FOUNDRY_PROJECT_ENDPOINT: str = os.getenv("FOUNDRY_PROJECT_ENDPOINT", "")
+    # Real, observed root cause (2026-09-11): nothing wrapped runner.run()
+    # against Foundry's GlobalStandard (shared, best-effort) tier in a
+    # timeout, so a slow/throttled call under load just hung the request
+    # indefinitely — no error, no fallback, no user-visible feedback beyond
+    # a spinner. See agent_framework_llm._run_with_timeout().
+    #
+    # 40s was the original value here — wrong, found the same day by the new
+    # automation suite (paynexus-v2.1-test-suite): 17 of 19 failures in a
+    # single run clustered at 43,000-46,000ms, just past that ceiling. A
+    # normal, successful single-agent completion against this app's real
+    # prompts (long system prompt, GPT-4o, a full JSON schema, sometimes a
+    # retry-on-suspicious-response) routinely takes 43-46s — not a hang,
+    # just this app's actual steady-state latency. 90s keeps a healthy >2x
+    # margin over that observed real maximum while still catching a genuine
+    # hang well inside it (vs. the indefinite hang this whole mechanism
+    # replaced) — recalibrate again from real data, not from guessing, if
+    # this ever starts firing on real requests again.
+    FOUNDRY_CALL_TIMEOUT_SECONDS: int = int(os.getenv("FOUNDRY_CALL_TIMEOUT_SECONDS", "90"))
+    # regulatory_agent's RAG-miss web-search fallback does a real Bing
+    # round trip plus tool-call reasoning on top of the base completion —
+    # genuinely slower than a plain structured completion, so it gets its
+    # own, longer ceiling rather than sharing the value above. Also
+    # recalibrated 2026-09-12 from real automation-suite data: an observed
+    # successful run took 67s against the original 60s ceiling.
+    FOUNDRY_WEB_SEARCH_TIMEOUT_SECONDS: int = int(os.getenv("FOUNDRY_WEB_SEARCH_TIMEOUT_SECONDS", "120"))
     FOUNDRY_DEPLOYMENT_MAP: dict[str, str] = {
         "gpt-4o": "gpt-4o",
         "gpt-4o-mini": "gpt-4.1-mini",

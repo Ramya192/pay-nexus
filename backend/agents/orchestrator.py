@@ -5,8 +5,9 @@ assembler's merge/formatting logic. All of it is zero-LLM Python (except
 the prompt string itself, which orchestrator_v2.py's own Agent Framework
 classifier calls), unrelated to *how* the agents that feed it actually
 run, so none of it needed reimplementing when the orchestration mechanism
-(LangGraph -> Microsoft Agent Framework's ConcurrentBuilder) changed. See
-PROJECT_CONTEXT.md §8/§11 for the state shape this operates on.
+(LangGraph -> Microsoft Agent Framework's asyncio.gather-based concurrent
+fan-out) changed. See PROJECT_CONTEXT.md §8/§11 for the state shape this
+operates on.
 
 This module used to also own the LangGraph StateGraph itself
 (orchestrator_node/route_to_agents/build_graph/paynexus_graph) — removed

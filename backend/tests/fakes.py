@@ -15,6 +15,7 @@ re-parsing it; it hands the already-typed object straight through, exactly
 as a real structured-output call's `.value` would ultimately resolve to.
 """
 
+import asyncio
 from collections.abc import Sequence
 from typing import Any
 
@@ -31,12 +32,17 @@ class FakeChatClient(BaseChatClient):
     the call's actual output quality.
     """
 
-    def __init__(self, canned_values: BaseModel | str | list[BaseModel | str]) -> None:
+    def __init__(
+        self, canned_values: BaseModel | str | list[BaseModel | str], delay_seconds: float = 0.0
+    ) -> None:
         super().__init__()
         self._canned_values = canned_values if isinstance(canned_values, list) else [canned_values]
+        self._delay_seconds = delay_seconds  # simulates a slow/hung Foundry call, for timeout tests
         self.calls: list[dict[str, Any]] = []  # every call's messages/options, for assertions
 
     async def _inner_get_response(self, *, messages: Sequence[Message], stream: bool, options: dict, **kwargs: Any):
+        if self._delay_seconds:
+            await asyncio.sleep(self._delay_seconds)
         self.calls.append({"messages": list(messages), "stream": stream, "options": dict(options)})
         # A list of canned values is consumed in order (e.g. a deliberately
         # bad first answer, then a good one — to test agent_complete()'s
@@ -46,3 +52,13 @@ class FakeChatClient(BaseChatClient):
         if isinstance(value, BaseModel):
             return ChatResponse(messages=[Message("assistant", [value.model_dump_json()])], value=value)
         return ChatResponse(messages=[Message("assistant", [value])])
+
+    @staticmethod
+    def get_web_search_tool(**kwargs: Any):
+        """Real FoundryChatClient.get_web_search_tool is a plain @staticmethod
+        that only builds a WebSearchTool config object — no network, no
+        instance state — so reusing the real one here is faithful, not a
+        shortcut; there's no meaningful "fake" version to write instead."""
+        from agent_framework.foundry import FoundryChatClient
+
+        return FoundryChatClient.get_web_search_tool(**kwargs)
