@@ -73,6 +73,15 @@ class TestSentinelTriggersWebSearchFallback:
             return "The Income-tax Act 2025 renumbered salary TDS as Section 392.", _WEB_METRICS
 
         monkeypatch.setattr("agents.regulatory_agent.web_search_complete_text", fake_web_search)
+        # A real bug this test itself caused before this mock existed: a
+        # genuine fallback trigger reaches cache_web_answer() unconditionally
+        # (see regulatory_agent_node), which — unmocked — makes a REAL
+        # pgvector connection and writes this test's made-up answer into the
+        # shared production RAG collection under a realistic-looking query.
+        # Confirmed happened: this exact query/answer pair was found live in
+        # paynexus_tax_docs and had to be manually deleted. Mocked here the
+        # same way TestWebSearchMissIsNotCached already does it below.
+        monkeypatch.setattr("agents.regulatory_agent.cache_web_answer", lambda query, answer: None)
 
         result = regulatory_agent_node(
             {"user_query": "what are the new payslip rules from 2026?", "conversation": []}
@@ -102,6 +111,11 @@ class TestSentinelTriggersWebSearchFallback:
             _fake_text_call(f"  {_WEB_SEARCH_SENTINEL}  ", _RAG_METRICS),
         )
         monkeypatch.setattr("agents.regulatory_agent.web_search_complete_text", _fake_text_call("real answer", _WEB_METRICS))
+        # See test_exact_sentinel_triggers_fallback's comment above — same
+        # real gap, same fix: without this, a real pgvector write happens
+        # every run (this specific test's own garbage "q"/"real answer" pair
+        # was found live in production, multiple duplicate copies of it).
+        monkeypatch.setattr("agents.regulatory_agent.cache_web_answer", lambda query, answer: None)
 
         result = regulatory_agent_node({"user_query": "q", "conversation": []})
 
