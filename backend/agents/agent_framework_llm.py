@@ -24,7 +24,9 @@ completely unchanged; the Pydantic model only buys internal validation
 during this call, not a new external contract.
 """
 
+import asyncio
 import logging
+import random
 import re
 import time
 
@@ -123,6 +125,119 @@ def _merge_metrics(first: LLMCallMetrics, second: LLMCallMetrics) -> LLMCallMetr
     )
 
 
+class FoundryUnavailableError(TimeoutError):
+    """Raised instead of a bare `TimeoutError` once every retry attempt in
+    `_run_with_timeout` has timed out — a subclass, not a new exception
+    family, so nothing that already catches `TimeoutError`/`Exception`
+    upstream needs to change; it exists purely so api/routes/chat.py CAN
+    catch this specific, well-understood case (Foundry's shared capacity
+    tier genuinely saturated, confirmed by the fact that even a
+    backed-off retry didn't help) and give the user an honest, specific
+    explanation instead of the generic "something went wrong" every other
+    unexpected exception gets. See _run_with_timeout's docstring for the
+    full reasoning (2026-09-12 addition) and the Azure guidance it's
+    grounded in."""
+
+
+# Backoff before a timeout retry — deliberately NOT an immediate re-attempt.
+# Per Microsoft's own documented guidance for Azure OpenAI/Foundry's shared
+# GlobalStandard tier (learn.microsoft.com Q&A threads on 429/latency
+# handling, cross-checked against multiple independent write-ups, not
+# assumed): the standard, recommended pattern for a saturated shared-capacity
+# pool is exponential backoff WITH jitter, never an immediate retry — hitting
+# the same contended pool again with zero delay does nothing to improve the
+# odds and, at any real scale, is exactly the kind of synchronized retry
+# ("thundering herd") that makes shared-tier contention worse for everyone
+# on it, not just this one request. A few seconds of backoff is negligible
+# next to the 90-120s timeout that already elapsed to get here.
+_TIMEOUT_RETRY_BACKOFF_BASE_S = 1.5
+_TIMEOUT_RETRY_BACKOFF_JITTER_S = 1.5
+
+
+async def _run_with_timeout(agent: str, coro_factory, timeout: float | None = None, retries: int = 1):
+    """Guards every real Foundry call against hanging indefinitely — and,
+    as of 2026-09-12, against having to fail the whole user turn the first
+    time that bound is hit.
+
+    Real, observed root cause (2026-09-11): nothing here ever wrapped
+    `runner.run()` in a timeout, so a slow/throttled response from
+    Foundry's GlobalStandard (shared, best-effort — not dedicated) tier —
+    the same shared-capacity behavior documented in
+    _is_suspiciously_generic()'s docstring, just manifesting as latency
+    instead of a contentless completion — just hung the whole request
+    forever: no error, no fallback, no feedback beyond a spinner. Confirmed
+    live: the exact same single-agent query hung twice in a row and had to
+    be manually stopped both times.
+
+    **2026-09-12 addition, found live**: the timeout guard above turned an
+    indefinite hang into a bounded failure, but did nothing to actually
+    recover from it — a timed-out call still surfaced the generic SSE
+    error to the user every single time, who then had to notice the
+    failure and manually re-ask the exact same question themselves before
+    it would work (confirmed live: a "new payslip rules" regulatory
+    question — the slower of the two regulatory paths, since a RAG-miss
+    triggers a second, real web-search call on top of the first — failed
+    outright on one attempt, then succeeded on unmodified retry).
+
+    Grounded in Microsoft's own documented guidance for exactly this
+    situation (Azure OpenAI/Foundry Q&A threads on GlobalStandard latency
+    and 429 handling — not guessed): (1) retry with exponential backoff
+    AND jitter, never an immediate re-attempt against a saturated shared
+    pool (see _TIMEOUT_RETRY_BACKOFF_BASE_S's comment); (2) Provisioned
+    Throughput (PTU) is Microsoft's own stated fix for consistently low
+    latency — GlobalStandard is explicitly a best-effort tier by design,
+    and no amount of client-side retry logic changes that; a genuinely
+    latency-sensitive production deployment of this app should budget for
+    PTU, not lean on retries alone indefinitely. This function is the
+    honest, bounded mitigation available at zero additional infra cost,
+    not a claim that it makes the underlying tier behave like a dedicated
+    one.
+
+    `coro_factory` is a zero-argument callable returning a FRESH coroutine
+    each time it's invoked (e.g. `lambda: runner.run(user_prompt)`), not a
+    bare coroutine object — a coroutine can only ever be awaited once, so
+    retrying requires creating a new one per attempt rather than reusing
+    the one `asyncio.wait_for` already consumed (and cancelled) on the
+    prior timeout.
+
+    Still only retries on `TimeoutError` specifically — any other
+    exception (a real 4xx/5xx from Foundry, an auth failure, etc.)
+    propagates immediately, same as before this existed. After `retries`
+    timeouts in a row (default 1, i.e. 2 attempts total), raises
+    `FoundryUnavailableError` (a `TimeoutError` subclass, so anything
+    upstream that already handles `TimeoutError`/`Exception` is
+    unaffected) specifically so api/routes/chat.py can recognize this
+    exact, well-understood case and give the user an honest, specific
+    message ("high demand, try again shortly") instead of the generic
+    catch-all error every other unexpected exception still gets.
+    """
+    effective_timeout = timeout if timeout is not None else config.FOUNDRY_CALL_TIMEOUT_SECONDS
+    attempt = 0
+    while True:
+        try:
+            return await asyncio.wait_for(coro_factory(), timeout=effective_timeout)
+        except TimeoutError:
+            attempt += 1
+            if attempt > retries:
+                logger.warning(
+                    "%s: Foundry call exceeded the %ss timeout on attempt %d/%d (with backoff between "
+                    "attempts) — giving up and surfacing a high-demand error to the user.",
+                    agent, effective_timeout, attempt, retries + 1,
+                )
+                raise FoundryUnavailableError(
+                    f"{agent}: Foundry call exceeded the {effective_timeout}s timeout on all "
+                    f"{retries + 1} attempt(s)."
+                ) from None
+            backoff = _TIMEOUT_RETRY_BACKOFF_BASE_S * (2 ** (attempt - 1)) + random.uniform(
+                0, _TIMEOUT_RETRY_BACKOFF_JITTER_S
+            )
+            logger.warning(
+                "%s: Foundry call exceeded the %ss timeout on attempt %d/%d — backing off %.1fs then retrying.",
+                agent, effective_timeout, attempt, retries + 1, backoff,
+            )
+            await asyncio.sleep(backoff)
+
+
 # One shared credential + one FoundryChatClient per deployment name — built
 # lazily (not at import time) so importing this module never requires Azure
 # credentials to be resolvable (e.g. in a unit-test process with no
@@ -181,7 +296,7 @@ async def agent_complete(
     options = ChatOptions(response_format=response_model)
 
     start = time.perf_counter()
-    response = await runner.run(user_prompt, options=options)
+    response = await _run_with_timeout(agent, lambda: runner.run(user_prompt, options=options))
     metrics = record_from_agent_response(
         agent=agent, model=deployment, response=response, latency_ms=(time.perf_counter() - start) * 1000
     )
@@ -190,7 +305,7 @@ async def agent_complete(
     if check_for_generic_response and _is_suspiciously_generic(_narrative_text(parsed)):
         logger.warning("%s: suspiciously short completion, retrying once. Got: %r", agent, _narrative_text(parsed))
         start = time.perf_counter()
-        retry_response = await runner.run(user_prompt, options=options)
+        retry_response = await _run_with_timeout(agent, lambda: runner.run(user_prompt, options=options))
         retry_metrics = record_from_agent_response(
             agent=agent, model=deployment, response=retry_response, latency_ms=(time.perf_counter() - start) * 1000
         )
@@ -235,7 +350,7 @@ async def hybrid_agent_complete_text(system_prompt: str, user_prompt: str, model
     runner = Agent(client=client, instructions=system_prompt, name=agent)
 
     start = time.perf_counter()
-    response = await runner.run(user_prompt)
+    response = await _run_with_timeout(agent, lambda: runner.run(user_prompt))
     metrics = record_from_agent_response(
         agent=agent, model=deployment, response=response, latency_ms=(time.perf_counter() - start) * 1000
     )
@@ -244,7 +359,7 @@ async def hybrid_agent_complete_text(system_prompt: str, user_prompt: str, model
     if _is_suspiciously_short(text):
         logger.warning("%s: suspiciously short completion, retrying once. Got: %r", agent, text)
         start = time.perf_counter()
-        retry_response = await runner.run(user_prompt)
+        retry_response = await _run_with_timeout(agent, lambda: runner.run(user_prompt))
         retry_metrics = record_from_agent_response(
             agent=agent, model=deployment, response=retry_response, latency_ms=(time.perf_counter() - start) * 1000
         )
@@ -252,3 +367,59 @@ async def hybrid_agent_complete_text(system_prompt: str, user_prompt: str, model
         metrics = _merge_metrics(metrics, retry_metrics)
 
     return text, metrics
+
+
+# The only deployed model confirmed (via direct testing, not assumed from
+# docs) to support get_web_search_tool()'s allowed_domains/filters param —
+# gpt-4.1-mini 400s with "Parameter 'filters' not supported with model
+# 'gpt-4.1-mini-2025-04-14'". Hardcoded rather than looked up from
+# FOUNDRY_DEPLOYMENT_MAP's caller-supplied model, since this function's
+# whole point is domain-restricted web search, which only works at all on
+# this one model.
+_WEB_SEARCH_MODEL = "gpt-4o"
+
+
+async def web_search_complete_text(
+    system_prompt: str, user_prompt: str, agent: str, allowed_domains: list[str]
+) -> tuple[str, LLMCallMetrics]:
+    """Cloud-only, tool-using completion via Agent Framework + Foundry's
+    built-in web search tool (GA, Microsoft-managed Bing — no separate
+    search API key or account needed, unlike a typical custom RAG-fallback
+    setup) restricted to `allowed_domains`. Built for regulatory_agent's
+    RAG-miss fallback (see its module docstring): when the local pgvector
+    index doesn't cover a question, this searches the live web instead of
+    leaving the user to go look it up themselves.
+
+    Always gpt-4o (see _WEB_SEARCH_MODEL) and always cloud — no Ollama/
+    hybrid path, since a live web search inherently needs a real internet-
+    connected cloud call; there's nothing meaningful to fall back to
+    locally. No retry-on-suspicious-response handling either: a real web
+    search's answer length depends entirely on what's actually out there,
+    so a short "I couldn't find that" from the model here is more likely a
+    genuinely honest result than a load-related contentless completion.
+    """
+    deployment = config.FOUNDRY_DEPLOYMENT_MAP.get(_WEB_SEARCH_MODEL, _WEB_SEARCH_MODEL)
+    client = _foundry_client(deployment)
+    tool = client.get_web_search_tool(allowed_domains=allowed_domains)
+    runner = Agent(client=client, instructions=system_prompt, name=agent, tools=[tool])
+
+    start = time.perf_counter()
+    # lambda, not a bare coroutine — see _run_with_timeout's docstring. Real,
+    # newly-introduced bug (2026-09-12, found via code inspection while
+    # hardening the regulatory web-search-fallback path — unrelated to the
+    # separate "no such payslip rules exist" wrong-ANSWER report, which was
+    # a genuine content gap, not a crash): this call site was missed when
+    # the other 4 call sites were converted to the coro_factory pattern
+    # earlier in the same retry/backoff change, so EVERY web-search-fallback
+    # call was raising "'coroutine' object is not callable" here, crashing
+    # the whole regulatory_agent_node turn instead of ever reaching a
+    # useful retry. No offline test caught it — tests/fakes.py's
+    # FakeChatClient never exercised this function before this bug's own
+    # regression test (TestWebSearchCompleteText below) was added.
+    response = await _run_with_timeout(
+        agent, lambda: runner.run(user_prompt), timeout=config.FOUNDRY_WEB_SEARCH_TIMEOUT_SECONDS
+    )
+    metrics = record_from_agent_response(
+        agent=agent, model=deployment, response=response, latency_ms=(time.perf_counter() - start) * 1000
+    )
+    return response.text, metrics
