@@ -9,6 +9,12 @@ behind a LangGraph orchestrator.
 **Live**: [nice-desert-0837ea310.7.azurestaticapps.net](https://nice-desert-0837ea310.7.azurestaticapps.net)
 (frontend) · `paynexus-api.azurewebsites.net` (backend API)
 
+**V2** — a larger 7-agent version adding bank statements, budgeting, savings goals, and scenario
+planning on top of this same payslip/tax core — is live separately at
+[ambitious-pebble-083cdaf10.7.azurestaticapps.net](https://ambitious-pebble-083cdaf10.7.azurestaticapps.net)
+· `paynexus-api-v2.azurewebsites.net`, built on the `v2-dev` branch of the same repo
+([`Ramya192/pay-nexus`](https://github.com/Ramya192/pay-nexus/tree/v2-dev)).
+
 ## Architecture
 
 Two things drive most of the design decisions below: **every number a user sees traces to a Python
@@ -45,9 +51,11 @@ I save" might hit all three. Their responses get merged and shown together.
 
 CI/CD: `.github/workflows/deploy.yml` — pushes to `main` build+push the backend image to Docker Hub (Azure's
 Continuous Deployment webhook then re-pulls it automatically) and build+deploy the frontend to Static Web
-Apps. Real ongoing cost: **~$34/month** (Postgres + App Service; Static Web Apps and Docker Hub are free),
-currently running against a $200 Azure free-trial credit with a hard spending limit (no card can be
-charged).
+Apps. The webhook needs "SCM Basic Auth Publishing Credentials" enabled on the App Service (Settings →
+Configuration) to even retrieve its own URL from Deployment Center — found disabled (silently breaking
+auto-deploy) and re-enabled 2026-08-17, re-verified against a real push after. Real ongoing cost:
+**~$34/month** (Postgres + App Service; Static Web Apps and Docker Hub are free), currently running
+against a $200 Azure free-trial credit with a hard spending limit (no card can be charged).
 
 ## Stack
 
