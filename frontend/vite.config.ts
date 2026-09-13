@@ -11,6 +11,10 @@ export default defineConfig({
       "/chat": "http://localhost:8000",
       "/payslip": "http://localhost:8000",
       "/financial-profile": "http://localhost:8000",
+      "/statement": "http://localhost:8000",
+      "/goals": "http://localhost:8000",
+      "/budget": "http://localhost:8000",
+      "/aa": "http://localhost:8000",
     },
   },
 });

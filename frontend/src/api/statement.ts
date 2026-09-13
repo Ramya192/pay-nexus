@@ -9,14 +9,6 @@ export interface ParsedTransaction {
   source_account: string;
   category: string | null;
   category_source: string | null;
-  // Loose, optional dict-style fields the credit-card billing-cycle feature
-  // stamps client-side — backend/analytics/spending_trends.py reads these
-  // directly off the plain dict (never declared on backend/models.py's
-  // Transaction, same precedent as statement_period below); absent/undefined
-  // on every ordinary transaction means "counts toward both" (the default
-  // both backend filters fall back to). See CreditCardStatementUploader.tsx.
-  counts_toward_category_spend?: boolean;
-  counts_toward_net_savings?: boolean;
 }
 
 export interface StatementParseResult {
@@ -42,35 +34,6 @@ export async function parseStatementText(
     text,
     source_account: sourceAccount,
     format,
-  });
-  return data;
-}
-
-/**
- * A single hand-entered transaction, categorized the same way as anything
- * that comes through /statement/parse — for manual cash-transaction entry
- * and the credit-card feature's synthetic "bill payment" row. Nothing is
- * persisted here; the caller saves the result itself via saveStatement (new
- * entry) or updateStatement (appending to one already saved this month).
- * `occurrence` must be computed by the caller against whatever existing
- * transaction list this will be appended to — see backend/models.py's
- * make_transaction_id docstring for why a wrong value silently collides IDs.
- */
-export async function categorizeManualTransaction(
-  date: string,
-  description: string,
-  amount: number,
-  sourceAccount: string,
-  category?: string,
-  occurrence = 0
-): Promise<ParsedTransaction> {
-  const { data } = await apiClient.post<ParsedTransaction>("/statement/categorize-manual", {
-    date,
-    description,
-    amount,
-    source_account: sourceAccount,
-    category: category || null,
-    occurrence,
   });
   return data;
 }

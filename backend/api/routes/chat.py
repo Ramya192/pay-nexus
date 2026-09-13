@@ -33,6 +33,9 @@ def chat(body: ChatRequest, user: User = Depends(get_current_user)) -> Streaming
         "session_history": body.session_history or [],
         "payslip_history": body.payslip_history or [],
         "conversation": body.conversation or [],
+        "transactions": body.transactions or [],
+        "goals": body.goals or [],
+        "budgets": body.budgets or {},
         "user_id": user.id,
     }
     return StreamingResponse(_stream_graph(initial_state), media_type="text/event-stream")

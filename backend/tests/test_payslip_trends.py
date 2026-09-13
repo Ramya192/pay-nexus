@@ -138,11 +138,25 @@ class TestFormatting:
         text = format_duplicates_for_prompt([{"month": "2026-01"}])
         assert "no duplicate months found" in text
 
+    def test_format_duplicates_for_prompt_no_history_at_all(self):
+        """Real bug found in testing: with zero saved payslips, this used
+        to never even get called (nudge_agent.py gated it behind `if
+        payslip_history:`), so a "check for duplicates" question got
+        answered with no grounding — the model said "no duplicates found",
+        which is technically vacuously true but wrongly implies a check
+        ran against real history. This must read as a distinctly different
+        answer from "history exists, no duplicates in it"."""
+        text = format_duplicates_for_prompt([])
+        assert "no payslip history saved yet" in text
+        assert "no duplicate months found" not in text
+
     def test_format_duplicates_for_prompt_points_to_ui_not_offering_to_delete(self):
         snapshots = [{"month": "2026-01"}, {"month": "2026-01"}]
         text = format_duplicates_for_prompt(snapshots)
         assert "Remove duplicates" in text
         assert "2026-01 (2 copies)" in text
+        assert "tab" in text
+        assert "sidebar" not in text.lower()
 
     def test_trends_table_shape(self):
         snapshots = [{"month": "2026-01", "basic": 50_000}, {"month": "2026-02", "basic": 55_000}]

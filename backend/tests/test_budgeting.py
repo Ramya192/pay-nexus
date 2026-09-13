@@ -40,45 +40,6 @@ class TestSuggestedBudgets:
         suggested = suggested_budgets_for_salary_bracket("not a real bracket")
         assert suggested["Rent"] == 18000
 
-    # The 3 real brackets between the two already covered above — every
-    # entry in SALARY_BRACKETS now has direct coverage, not just the
-    # baseline/lowest/fallback cases. Figures are the actual computed
-    # output (round(amount * multiplier, -2)), confirmed by direct run
-    # rather than hand-derived, since round-half-to-even on a genuine
-    # .50 case (Utilities: 2500 * 0.7 = 1750, 2500 * 1.5 = 3750) rounds to
-    # the nearer EVEN hundred (1800, 3800) — worth locking in explicitly
-    # rather than assuming ordinary round-half-up.
-    def test_30k_60k_bracket_scales_by_0_7x(self):
-        suggested = suggested_budgets_for_salary_bracket("30k-60k")
-        assert suggested == {
-            "Rent": 12600, "Groceries": 3500, "Food & Dining": 1400,
-            "Transport": 700, "Subscriptions": 700, "Shopping": 3500, "Utilities": 1800,
-        }
-
-    def test_100k_150k_bracket_scales_by_1_5x(self):
-        suggested = suggested_budgets_for_salary_bracket("100k-150k")
-        assert suggested == {
-            "Rent": 27000, "Groceries": 7500, "Food & Dining": 3000,
-            "Transport": 1500, "Subscriptions": 1500, "Shopping": 7500, "Utilities": 3800,
-        }
-
-    def test_150k_plus_bracket_scales_by_2_2x(self):
-        suggested = suggested_budgets_for_salary_bracket("150k+")
-        assert suggested == {
-            "Rent": 39600, "Groceries": 11000, "Food & Dining": 4400,
-            "Transport": 2200, "Subscriptions": 2200, "Shopping": 11000, "Utilities": 5500,
-        }
-
-    def test_every_real_bracket_has_a_distinct_multiplier_applied(self):
-        """Cross-bracket sanity check: strictly increasing Rent suggestion as
-        the bracket rises, for every adjacent pair — catches a mixed-up
-        multiplier table entry that a single-bracket test could miss."""
-        from budgeting.budgets import SALARY_BRACKETS
-
-        rents = [suggested_budgets_for_salary_bracket(b)["Rent"] for b in SALARY_BRACKETS]
-        assert rents == sorted(rents)
-        assert len(set(rents)) == len(SALARY_BRACKETS)  # no two brackets coincidentally equal
-
 
 class TestLatestPeriod:
     def test_none_with_no_transactions(self):

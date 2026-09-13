@@ -23,6 +23,42 @@ class Config:
     NUDGE_AGENT_MODEL: str = "gpt-4o-mini"        # or phi4-mini via Ollama toggle
     ORCHESTRATOR_MODEL: str = "gpt-4o"
 
+    # --- V2: SpendingAnalyser ---
+    # SPENDING_AGENT_MODEL is gpt-4o (same tier as Payslip agent): it narrates
+    # over transactions already saved to a session, live in conversation,
+    # with no review step — same "wrong numbers directly mislead the user"
+    # reasoning. STATEMENT_PARSE_MODEL/SPENDING_CATEGORIZE_MODEL stay at
+    # gpt-4o-mini, same tier and same reasoning as payslip_extraction.py's:
+    # both only pre-fill a transaction list the user reviews (and the
+    # category can be corrected) before "Save this statement" persists it.
+    SPENDING_AGENT_MODEL: str = "gpt-4o"
+    STATEMENT_PARSE_MODEL: str = "gpt-4o-mini"
+    SPENDING_CATEGORIZE_MODEL: str = "gpt-4o-mini"
+
+    # --- V2: GoalTracker ---
+    # gpt-4o-mini + Ollama hybrid toggle, same tier as Nudge/Regulatory: it
+    # narrates over precomputed target-vs-saved math (analytics/
+    # goal_progress.py), never invents a number, same "softer reasoning
+    # over pre-solved figures" reasoning as the rest of that tier.
+    GOAL_AGENT_MODEL: str = "gpt-4o-mini"
+
+    # --- V2: BudgetPlanner ---
+    # Same tier and reasoning as GoalTracker — narrates over precomputed
+    # check_overspending alerts (budgeting/budgets.py), never derives its
+    # own overspend figures.
+    BUDGET_AGENT_MODEL: str = "gpt-4o-mini"
+
+    # --- V2: What-If Simulator ---
+    # WHATIF_AGENT_MODEL is gpt-4o (same tier as Payslip/SpendingAnalyser):
+    # a hypothetical that gets acted on is still a real financial decision,
+    # same "wrong numbers directly mislead the user" reasoning — no review
+    # step softens a scenario answer the way a pre-fill form does.
+    # WHATIF_EXTRACTION_MODEL stays gpt-4o-mini, same tier and reasoning as
+    # payslip_extraction.py/statement_extraction.py: structured extraction
+    # of what the user explicitly typed, not financial reasoning itself.
+    WHATIF_AGENT_MODEL: str = "gpt-4o"
+    WHATIF_EXTRACTION_MODEL: str = "gpt-4o-mini"
+
     # --- RAG ---
     # Vectors live in Postgres via pgvector on DATABASE_URL below — no separate
     # vector DB service, no index file to persist to blob storage.

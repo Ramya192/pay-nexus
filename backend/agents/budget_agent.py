@@ -14,12 +14,8 @@ credit card's own billing cycle is checked as one period, not split by
 calendar month.
 """
 
-import asyncio
-
-from pydantic import BaseModel
-
-from agents.agent_framework_llm import hybrid_agent_complete
 from agents.conversation import format_conversation_for_prompt
+from agents.llm import hybrid_complete
 from agents.state import PayNexusState
 from agents.tables import resolve_selected_tables
 from budgeting.budgets import (
@@ -28,19 +24,6 @@ from budgeting.budgets import (
     latest_period,
 )
 from config import config
-
-
-class BudgetAgentResponse(BaseModel):
-    """The same JSON contract this agent always returned, now validated by
-    the model instead of hand-parsed by every caller. See
-    agents/agent_framework_llm.py's module docstring: still serialized back
-    to a JSON string before being stored in state, so
-    resolve_selected_tables/tests/agent_eval are unaffected."""
-
-    explanation: str
-    tables: list[str] = []
-    follow_up_suggestions: list[str] = []
-
 
 _SYSTEM_PROMPT = """You are the BudgetPlanner Agent inside PayNexus, an Indian personal finance \
 assistant. You are given one user's actual per-category monthly budget and their categorized \
@@ -65,11 +48,8 @@ If the user's question also touches goals or payslip figures, answer ONLY the bu
 and say nothing else about those other topics — not even that you don't have access to them, not \
 even a pointer to "the right tool." A separate agent already answers that part of the question, in \
 the SAME response, right alongside yours — you don't need to acknowledge it exists, flag that you \
-personally lack it, or redirect the user anywhere. A real observed bug had you write "Regarding \
-your goal progress, I have no data to comment on that" immediately above GoalTracker's answer that \
-DID cover it, in that SAME response — reads as broken/contradicting yourself even though the \
-sentence was narrowly true. Simplest fix: just don't bring up any topic outside budget/spending at \
-all, positively or negatively — not even a one-line aside.
+personally lack it, or redirect the user anywhere. Simplest fix: just don't bring up any topic \
+outside budget/spending at all, positively or negatively.
 
 Be specific with rupee figures wherever the data supports it. Address the user directly throughout, \
 in second person ("you," "your") — never slip into third-person ("her," "his," "their," "the \
@@ -117,19 +97,8 @@ def budget_agent_node(state: PayNexusState) -> dict:
     prompt_parts.append(f"Question: {state['user_query']}")
     user_prompt = "\n\n".join(prompt_parts)
 
-    # asyncio.run(), not an async def node function — see
-    # agents/agent_framework_llm.py's module docstring: this keeps the node
-    # directly callable exactly as before (plain dict -> dict, no test/eval
-    # harness or LangGraph-invocation changes needed) while the actual LLM
-    # call underneath is genuinely async (Agent Framework's Agent.run()).
-    answer, metrics = asyncio.run(
-        hybrid_agent_complete(
-            _SYSTEM_PROMPT,
-            user_prompt,
-            model=config.BUDGET_AGENT_MODEL,
-            response_model=BudgetAgentResponse,
-            agent="budget_agent",
-        )
+    answer, metrics = hybrid_complete(
+        _SYSTEM_PROMPT, user_prompt, model=config.BUDGET_AGENT_MODEL, json_mode=True, agent="budget_agent"
     )
     return {
         "budget_response": answer,

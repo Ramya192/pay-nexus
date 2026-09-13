@@ -59,6 +59,7 @@ from tax_slabs import (
     compute_new_regime_tax,
     compute_old_regime_tax,
     estimate_annual_gross_income,
+    regime_choice_available,
     tax_liability_table,
 )
 
@@ -144,6 +145,13 @@ which row of the table you're citing before writing the sentence.
 Be specific with rupee figures wherever the payslip data supports it. If a figure can't be \
 computed from what's given, say what additional input is needed rather than guessing.
 
+If the user's question also touches spending, goal, or budget figures, answer ONLY the payslip \
+part and say nothing else about those other topics — not even that you don't have access to them, \
+not even a pointer to "the right tool." A separate agent already answers that part of the question, \
+in the SAME response, right alongside yours — you don't need to acknowledge it exists, flag that \
+you personally lack it, or redirect the user anywhere. Simplest fix: just don't bring up any topic \
+outside payslip data at all, positively or negatively.
+
 Address the user directly throughout, in second person ("you," "your") — never slip into \
 third-person ("her," "his," "their," "the user's") mid-answer.
 
@@ -203,7 +211,20 @@ def payslip_agent_node(state: PayNexusState) -> dict:
     # math and the two caveats (FY basis, income-estimation method) the
     # prompt is required to disclose whenever it uses this.
     annual_income, income_note = estimate_annual_gross_income(payslip_data, payslip_history)
-    if annual_income > 0:
+    if annual_income > 0 and not regime_choice_available(payslip_data.get("month")):
+        # The new regime didn't exist yet for this payslip's period (see
+        # tax_slabs.regime_choice_available) — a real gap found: this
+        # codebase would otherwise silently run today's slabs against an
+        # old payslip and present a "new regime is cheaper" choice that
+        # was never actually available at the time.
+        prompt_parts.append(
+            f"This payslip is from {payslip_data.get('month')} — the new tax regime didn't exist "
+            "yet then (it was introduced in Union Budget 2020, effective FY2020-21/April 2020 "
+            "onward). Only the old regime was available for that period. If asked which regime "
+            "to choose or to compare regimes, say so plainly — there was no choice to make at "
+            "the time — rather than presenting a new-vs-old comparison."
+        )
+    elif annual_income > 0:
         old_result = compute_old_regime_tax(annual_income, total_deductions)
         new_result = compute_new_regime_tax(annual_income)
         # The actual totals, not just the method note — without this the

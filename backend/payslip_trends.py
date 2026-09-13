@@ -111,15 +111,33 @@ def detect_duplicate_months(snapshots: list[dict]) -> list[tuple[str, int]]:
 
 
 def format_duplicates_for_prompt(snapshots: list[dict]) -> str:
+    """Distinguishes 'no payslip history at all' from 'history exists, no
+    duplicates in it' — found as a real bug in testing: nudge_agent.py used
+    to skip calling this function entirely when snapshots was empty, so a
+    "check for duplicates" question with zero saved payslips got answered
+    with no grounding at all, and the model said "no duplicates found" —
+    true in the vacuous sense, but implying a real check ran against
+    existing data when there wasn't any to check. Always called
+    unconditionally now (see nudge_agent_node), so this needs to cover the
+    empty case itself rather than relying on the caller to skip it."""
+    if not snapshots:
+        return (
+            "Duplicate-month check (already computed): no payslip history saved yet — say so "
+            "plainly rather than reporting 'no duplicates found', which would wrongly imply a "
+            "check ran against existing history."
+        )
     duplicates = detect_duplicate_months(snapshots)
     if not duplicates:
-        return "Duplicate-month check (already computed): no duplicate months found in payslip history."
+        return (
+            f"Duplicate-month check (already computed): {len(snapshots)} payslip snapshot(s) on "
+            "file, no duplicate months found."
+        )
     detail = ", ".join(f"{month} ({count} copies)" for month, count in duplicates)
     return (
         f"Duplicate-month check (already computed): {len(duplicates)} month(s) have more than one "
         f"saved snapshot — {detail}. Chat can't delete them (no agent can write to storage) — if the "
         "user wants them removed, point them to the \"Remove duplicates\" button in the Payslip "
-        "history section of the sidebar, not offer to do it here."
+        "history tab, not offer to do it here."
     )
 
 

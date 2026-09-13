@@ -12,16 +12,6 @@ same trust tier as payslip_data — decrypted client-side, plaintext for one
 request only, see PROJECT_CONTEXT.md §4) — this pydantic model is the
 validation/shape contract at the API boundary (api/models/statement.py),
 not the in-state representation.
-
-Three more dict-only fields analytics/spending_trends.py reads that this
-model deliberately doesn't declare, for the same reason `statement_period`
-isn't declared here either (see that module's own docstring): all are
-stamped client-side only, on synthetic/derived transactions this file's own
-ingestion paths (CSV/PDF parsing, categorize.py) never produce —
-`statement_period`, `counts_toward_category_spend`, and
-`counts_toward_net_savings` (the latter two default True when absent, used
-by the credit-card billing-cycle feature — see
-frontend/src/components/StatementUploader/CreditCardStatementUploader.tsx).
 """
 
 from __future__ import annotations

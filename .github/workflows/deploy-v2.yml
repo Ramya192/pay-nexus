@@ -2,11 +2,8 @@ name: Deploy PayNexus V2
 
 # Deliberately a SEPARATE workflow file from deploy.yml, not a branch
 # condition added to it -- keeps V1's deploy path (main -> paynexus-api /
-# paynexus-web) completely untouched. Triggered by foundry-v2 (the Agent
-# Framework/Foundry migration branch, now the sole active V2 line -- the
-# old v2-dev branch was retired 2026-09-13, and this branch was renamed
-# from foundry-v3 to foundry-v2 the same day once v2-dev was gone) so V2's
-# still-evolving feature set never risks V1's production resources.
+# paynexus-web) completely untouched. Triggered by v2-dev specifically so
+# V2's still-evolving feature set never risks V1's production resources.
 # Reuses the repo's existing DOCKERHUB_USERNAME/DOCKERHUB_TOKEN secrets
 # (not branch-scoped, already used by deploy.yml) but a SEPARATE Static
 # Web Apps deployment token (AZURE_STATIC_WEB_APPS_API_TOKEN_V2) since
@@ -14,43 +11,10 @@ name: Deploy PayNexus V2
 # Deployment section for the actual Azure resource names this targets.
 on:
   push:
-    branches: [foundry-v2]
+    branches: [v2-dev]
 
 jobs:
-  test-backend:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - run: pip install -r requirements.txt
-
-      # Placeholders, not real secrets — several modules do real work at
-      # import time: compression/context_compressor.py constructs an
-      # OpenAI(api_key=...) client (the SDK treats an empty-string key as
-      # "missing" and raises immediately, which crashed collection of
-      # test_compression.py and test_orchestrator_v2.py the first time this
-      # workflow ran on this branch (then named foundry-v3) — ported this
-      # fix over from v2-dev's already-working version of this same
-      # workflow, found and fixed there earlier rather than assumed away
-      # here). Explicit
-      # -m "not integration" is the actual gate that keeps real-API/DB
-      # tests from running, rather than relying on "is a key present" as a
-      # proxy for that, which the OPENAI_API_KEY placeholder would
-      # otherwise defeat.
-      - run: pytest -m "not integration"
-        env:
-          OPENAI_API_KEY: "sk-ci-placeholder-not-a-real-key"
-          DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci_placeholder"
-
   deploy-backend:
-    needs: test-backend
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

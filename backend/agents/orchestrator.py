@@ -17,13 +17,17 @@ import time
 from langgraph.graph import END, StateGraph
 from openai import OpenAI
 
+from agents.budget_agent import budget_agent_node
 from agents.conversation import format_conversation_for_prompt
+from agents.goal_agent import goal_agent_node
 from agents.llm_metrics import record_from_response
 from agents.llm_metrics import summarize as summarize_metrics
 from agents.nudge_agent import nudge_agent_node
 from agents.payslip_agent import payslip_agent_node
 from agents.regulatory_agent import regulatory_agent_node
+from agents.spending_agent import spending_agent_node
 from agents.state import PayNexusState
+from agents.whatif_agent import whatif_agent_node
 from compression.context_compressor import cap_session_history, compress_in_session
 from config import config
 
@@ -35,10 +39,26 @@ Agents: "payslip" (explaining THIS ONE active payslip — pay changes, HRA/TDS/r
 current month only, not a multi-month pattern), "regulatory" (about tax law / budget changes / \
 general rules, not this user's own numbers or situation), "nudge" (suggestions, savings/\
 investment opportunities, 80C/80D/24(b) deduction-gap questions, or ANYTHING about a pattern, \
-change, or comparison across more than one month/session — "trend," "increasing," "compare my \
-payslips," "over time," "concerning pattern," etc. all mean nudge, even though the word \
-"payslip(s)" appears in them, because analyzing multiple payslips together is the Nudge agent's \
-job, not the single-payslip agent's), "unsupported" (see the strict test below — reserved for an \
+change, or comparison across more than one month/session of PAYSLIP data — "trend," \
+"increasing," "compare my payslips," "over time," "concerning pattern," etc. all mean nudge, even \
+though the word "payslip(s)" appears in them, because analyzing multiple payslips together is the \
+Nudge agent's job, not the single-payslip agent's), "spending" (bank transactions, purchases, \
+where money went, spending by category, recurring merchants/subscriptions, or a trend in \
+SPENDING/transactions rather than in payslip figures — this is about uploaded bank statements, \
+never about basic/HRA/TDS/bonus, which stay payslip or nudge), "goal" (savings goals specifically \
+— a Trip, Home Loan, Education fund, Emergency Fund, Retirement, or any named goal; progress \
+toward one, whether the current pace is enough to hit a target date, adding up how much is saved \
+across goals — NOT the same as "nudge"'s 80C/tax-deduction savings room, and not "spending"'s \
+transaction categories, even though both can come up in the same answer), "budget" (whether \
+spending stayed within a per-category monthly budget, overspending alerts, "am I over budget" — \
+this is checking actual spend against a user-set TARGET, which is "spending"'s job only when no \
+target/limit is involved; "where did my money go" alone is spending, "did I stay under my grocery \
+budget" is budget), "whatif" (an explicit HYPOTHETICAL — "what if", "what would happen if", \
+"suppose I", "if I were to" — about switching regime, changing a deduction amount, changing a \
+budget category's spend, or contributing more to a goal; the deciding signal is the hypothetical \
+framing itself, not the topic, since the same topics (regime, budget, goal) are also asked about \
+for REAL current state via payslip/nudge/budget/goal — "am I over budget" is budget, "what if I \
+cut my budget by ₹1,000" is whatif), "unsupported" (see the strict test below — reserved for an \
 actual instruction to change stored data, not any question that happens to mention data that's \
 stored).
 
@@ -46,11 +66,17 @@ The word "payslip" alone doesn't mean the "payslip" agent — what matters is wh
 is about the one active payslip (→ payslip) or about several payslips / a pattern across them \
 (→ nudge). "Do you see any concerning trends in my payslips?" is nudge, not payslip, despite \
 containing the word "payslips," because "trends" and "concerning" signal a multi-month pattern \
-question.
+question. A "trend" question about spending/transactions instead (e.g. "is my spending going up," \
+"am I spending more than last month") is "spending," not "nudge" — the deciding factor is whether \
+the numbers in question come from a payslip (nudge/payslip) or from bank transactions (spending).
 
 A question can need more than one agent — e.g. "should I switch regimes" needs both payslip and \
 nudge; "how much more can I invest to save tax" is nudge alone, not regulatory, because it's \
-asking about this user's own remaining room, not the general rule.
+asking about this user's own remaining room, not the general rule. "Based on my spending, can I \
+afford to invest more in 80C" needs both spending (what's actually being spent) and nudge (the \
+80C room itself). "Am I saving enough for my trip goal given my spending" needs both goal (the \
+target/progress math) and spending (the actual savings rate behind it). "Why am I over my food \
+budget" needs both budget (confirming the overage) and spending (explaining what drove it).
 
 STRICT TEST for "unsupported" — apply it only if the message contains an explicit instruction \
 verb telling the system to change what's stored: delete, remove, clear, erase, edit, update, \
@@ -69,6 +95,20 @@ mentions stored data. Worked examples:
   "remove" — the "check" half doesn't cancel that removing is the actual instruction)
 - "delete my payslip for April" → unsupported
 - "clear my saved history" → unsupported
+- "where is most of my money going?" → spending
+- "what subscriptions am I paying for?" → spending
+- "am I spending more on food this month than last?" → spending (a trend, but in transactions, not payslip figures)
+- "how close am I to my trip goal?" → goal
+- "am I saving fast enough for my home loan down payment?" → goal (progress + pace), not spending alone
+- "am I over budget this month?" → budget
+- "did I stay under my grocery budget?" → budget, not spending alone (a target is involved)
+- "what if I switch to the new regime?" → whatif (hypothetical framing), NOT payslip/nudge — those \
+  answer with the user's real, current situation, not a hypothetical
+- "what if I invested ₹50,000 more in ELSS?" → whatif
+- "what if I cut my food budget by ₹1,000?" → whatif, not budget (budget only checks REAL spend \
+  against a REAL saved target; this is a hypothetical change to that target/spend)
+- "what if I saved ₹5,000 more a month for my Goa trip?" → whatif, not goal (goal reports real \
+  progress; this asks what a hypothetical extra contribution would do)
 
 If recent conversation is given below, use it to resolve what a short follow-up is actually \
 about — "consider the payslip history," "what about that," "yes, factor that in" etc. carry no \
@@ -77,12 +117,16 @@ conversation was about, not read as a fresh, unrelated request. E.g. if the prio
 a regime recommendation and the new message says "can you consider the payslip history," that's \
 still a regime question (payslip, possibly plus nudge) — not a brand-new nudge-only request.
 
-Respond with JSON: {"agents": ["payslip"|"regulatory"|"nudge"|"unsupported", ...]}."""
+Respond with JSON: {"agents": ["payslip"|"regulatory"|"nudge"|"spending"|"goal"|"budget"|"whatif"|"unsupported", ...]}."""
 
 _AGENT_KEY_TO_NODE = {
     "payslip": "payslip_agent",
     "regulatory": "regulatory_agent",
     "nudge": "nudge_agent",
+    "spending": "spending_agent",
+    "goal": "goal_agent",
+    "budget": "budget_agent",
+    "whatif": "whatif_agent",
     "unsupported": "capability_gap_node",
 }
 _ALL_AGENT_NODES = list(_AGENT_KEY_TO_NODE.values())
@@ -155,14 +199,24 @@ def capability_gap_node(state: PayNexusState) -> dict:
     nothing was. Found missing in testing — before this node existed, a
     request like "remove duplicate payslips" was silently misrouted to the
     Nudge agent, which has no delete capability and no way to say so; it
-    just answered a different, unrelated question instead."""
+    just answered a different, unrelated question instead.
+
+    No LLM call — what's possible here is fixed and already known, so the
+    message below covers every V2 data type generically rather than
+    guessing which one the user meant (the intent classifier's "unsupported"
+    bucket doesn't preserve a topic to key off of, and a keyword guess here
+    risks being confidently wrong for an ambiguous phrasing). Also fixed
+    from an earlier version that said "sidebar" — the sidebar was replaced
+    by tabs (components/Dashboard/TabbedPanel.tsx) and this message wasn't
+    updated at the time, a real found-in-testing staleness bug."""
     return {
         "unsupported_response": (
             "I can't add, edit, or delete your saved data from a chat message — that's kept as "
-            "an explicit action you take, not something an agent decides on its own. Open the "
-            "Payslip history section in the sidebar: each saved month has its own delete button, "
-            "and a \"Remove duplicates\" button clears out repeat entries for the same month, "
-            "keeping the most recently saved one."
+            "an explicit action you take, not something an agent decides on its own. Use whichever "
+            "tab holds what you're trying to change: Bank statements, Payslip history, and Goals "
+            "each list your saved entries with their own Delete button (Payslip history also has a "
+            "\"Remove duplicates\" button); Budget doesn't have a delete — just edit the numbers "
+            "directly on its own tab."
         )
     }
 
@@ -193,7 +247,10 @@ def _format_agent_response(raw: str) -> str:
     parts = [parsed["explanation"]]
     suggestions = parsed.get("follow_up_suggestions")
     if suggestions:
-        parts.append("\n".join(f"• {s}" for s in suggestions))
+        # Labeled explicitly — found in testing that a bare bullet list
+        # right after the explanation reads ambiguously (more facts? a
+        # checklist?) with nothing marking it as suggested next questions.
+        parts.append("You can ask more like:\n" + "\n".join(f"• {s}" for s in suggestions))
     return "\n\n".join(parts)
 
 
@@ -255,6 +312,18 @@ def assembler_node(state: PayNexusState) -> dict:
         # Advisor" is just clearer UI copy than "Nudge Agent".
         sections.append(("Savings Advisor", nudge_text))
         active.append("nudge_agent")
+    if state.get("spending_response"):
+        sections.append(("SpendingAnalyser Agent", _format_agent_response(state["spending_response"])))
+        active.append("spending_agent")
+    if state.get("goal_response"):
+        sections.append(("GoalTracker Agent", _format_agent_response(state["goal_response"])))
+        active.append("goal_agent")
+    if state.get("budget_response"):
+        sections.append(("BudgetPlanner Agent", _format_agent_response(state["budget_response"])))
+        active.append("budget_agent")
+    if state.get("scenario_response"):
+        sections.append(("Foresight Agent", _format_agent_response(state["scenario_response"])))
+        active.append("whatif_agent")
     if state.get("unsupported_response"):
         # Not one of the three reasoning agents, so no "[Name] reasoned
         # about your data" framing — plain "PayNexus" label, since nothing
@@ -291,6 +360,10 @@ def assembler_node(state: PayNexusState) -> dict:
         (state.get("payslip_tables") or [])
         + (state.get("nudge_tables") or [])
         + (state.get("regulatory_tables") or [])
+        + (state.get("spending_tables") or [])
+        + (state.get("goal_tables") or [])
+        + (state.get("budget_tables") or [])
+        + (state.get("scenario_tables") or [])
     ):
         seen_tables[json.dumps(table, sort_keys=True)] = table
     tables = list(seen_tables.values())
@@ -304,6 +377,10 @@ def assembler_node(state: PayNexusState) -> dict:
         + (state.get("payslip_llm_calls") or [])
         + (state.get("regulatory_llm_calls") or [])
         + (state.get("nudge_llm_calls") or [])
+        + (state.get("spending_llm_calls") or [])
+        + (state.get("goal_llm_calls") or [])
+        + (state.get("budget_llm_calls") or [])
+        + (state.get("scenario_llm_calls") or [])
     )
 
     return {
@@ -321,6 +398,10 @@ def build_graph():
     graph.add_node("payslip_agent", payslip_agent_node)
     graph.add_node("regulatory_agent", regulatory_agent_node)
     graph.add_node("nudge_agent", nudge_agent_node)
+    graph.add_node("spending_agent", spending_agent_node)
+    graph.add_node("goal_agent", goal_agent_node)
+    graph.add_node("budget_agent", budget_agent_node)
+    graph.add_node("whatif_agent", whatif_agent_node)
     graph.add_node("capability_gap_node", capability_gap_node)
     graph.add_node("assembler", assembler_node)
 

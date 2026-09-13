@@ -10,6 +10,15 @@
  * modal that can't be dismissed for a whole two-month window would get old
  * fast.
  *
+ * V2 additions (overspending/goal-deadline/stale-statement below) are the
+ * "don't wait to be asked" lever for the three newer agents — the payslip-
+ * side alerts above already did this (a user never has to think to ask
+ * "is my ITR deadline coming up"); spending/budget/goals had the same gap
+ * until now, answerable in chat but never surfaced unprompted. Same
+ * client-side-only, no-LLM computation as the payslip alerts, for the same
+ * reason: these are exact, structural facts (an amount over a limit, a
+ * date past a threshold), not something worth spending a model call on.
+ *
  * NOTE on the 80C/80D/24(b) limits below: duplicated from
  * backend/tax_calculations.py's SECTION_80C_LIMIT / SECTION_80D_LIMIT_* /
  * SECTION_24B_LIMIT, not imported — there's no shared package between the
@@ -17,9 +26,13 @@
  * both. Deliberately a rough check, not a Section-accurate one the way the
  * backend's version is (e.g. no employee-PF annualization) — good enough
  * for "you have meaningfully unused room, go ask," not a replacement for
- * the real chat-computed figure.
+ * the real chat-computed figure. The V2 alerts below carry the same
+ * "duplicated logic, not imported" caveat relative to
+ * backend/budgeting/budgets.py's check_overspending and
+ * backend/analytics/spending_trends.py's period grouping.
  */
 
+import type { Budget } from "../store/budgetStore";
 import type { FinancialProfile } from "../store/financialProfileStore";
 
 export interface Alert {
@@ -51,17 +64,26 @@ const FY_END_HEADROOM_END_MONTH = 2; // March, inclusive
 const MEANINGFUL_HEADROOM_THRESHOLD = 20_000;
 
 const STALE_PAYSLIP_MONTHS = 2;
+const STALE_STATEMENT_MONTHS = 2;
+const GOAL_DEADLINE_REMINDER_DAYS = 30;
+const GOAL_DEADLINE_URGENT_DAYS = 7;
 
 export function computeAlerts(
   now: Date,
   snapshots: Record<string, unknown>[],
-  financialProfile: FinancialProfile | null
+  financialProfile: FinancialProfile | null,
+  transactions: Record<string, unknown>[] = [],
+  budget: Budget | null = null,
+  goals: Record<string, unknown>[] = []
 ): Alert[] {
   return [
     itrFilingDeadlineAlert(now),
     regimeDeclarationAlert(now),
     deductionHeadroomAlert(now, financialProfile),
     stalePayslipAlert(now, snapshots),
+    overspendingAlert(transactions, budget),
+    goalDeadlineApproachingAlert(now, goals),
+    staleStatementAlert(now, transactions),
   ].filter((a): a is Alert => a !== null);
 }
 
@@ -142,6 +164,148 @@ function stalePayslipAlert(now: Date, snapshots: Record<string, unknown>[]): Ale
     id: "stale-payslip",
     title: "Your payslip history hasn't been updated in a while",
     message: `Your most recent saved payslip is from ${latest} (${monthsSince} months ago) — add your latest one so trends and recommendations stay accurate.`,
+    severity: "info",
+  };
+}
+
+// --- V2: spending/budget/goal alerts --------------------------------------
+//
+// `transactions` items are the same plain-dict shape store/transactionStore.ts
+// hands to /chat (models.Transaction plus a `statement_period` field — see
+// backend/analytics/spending_trends.py's module docstring for why period
+// grouping, not calendar-month slicing, is what these need to match the
+// backend's own reasoning).
+
+function periodOf(t: Record<string, unknown>): string | null {
+  const period = t.statement_period;
+  if (typeof period === "string" && period) return period;
+  const date = t.date;
+  return typeof date === "string" && date.length >= 7 ? date.slice(0, 7) : null;
+}
+
+function latestPeriod(transactions: Record<string, unknown>[]): string | null {
+  const periods = new Set<string>();
+  for (const t of transactions) {
+    const p = periodOf(t);
+    if (p) periods.add(p);
+  }
+  if (periods.size === 0) return null;
+  return [...periods].sort().at(-1) ?? null;
+}
+
+const AVG_DAYS_PER_MONTH = 30.44;
+
+/** How many real months long one statement period actually is — mirrors
+ * backend/analytics/spending_trends.py's period_span_months (duplicated,
+ * not imported — no shared package between this TS frontend and the
+ * Python backend, same caveat as this file's own module docstring already
+ * flags). Exists so overspendingAlert can prorate a MONTHLY budget target
+ * before comparing it against a period's actual spend — without this, a
+ * statement spanning more than ~1 real month (e.g. 01 Jul-15 Aug, 46 days)
+ * always looks over budget purely from covering extra days, not from a
+ * real overspend. Floored at 1.0 so a short period never shrinks the
+ * effective budget below one full month's worth. */
+function periodSpanMonths(transactions: Record<string, unknown>[], period: string): number {
+  const dates = transactions
+    .filter((t) => periodOf(t) === period)
+    .map((t) => t.date)
+    .filter((d): d is string => typeof d === "string" && d.length >= 10);
+  if (dates.length === 0) return 1;
+
+  const times = dates.map((d) => new Date(d).getTime()).filter((t) => !Number.isNaN(t));
+  if (times.length === 0) return 1;
+
+  const spanDays = (Math.max(...times) - Math.min(...times)) / 86_400_000 + 1;
+  return Math.max(spanDays / AVG_DAYS_PER_MONTH, 1);
+}
+
+function spendingByCategoryForPeriod(transactions: Record<string, unknown>[], period: string): Record<string, number> {
+  const totals: Record<string, number> = {};
+  for (const t of transactions) {
+    const amount = t.amount;
+    if (typeof amount !== "number" || amount >= 0) continue; // expenses only
+    if (periodOf(t) !== period) continue;
+    const category = typeof t.category === "string" && t.category ? t.category : "Uncategorized";
+    totals[category] = (totals[category] ?? 0) + -amount;
+  }
+  return totals;
+}
+
+function overspendingAlert(transactions: Record<string, unknown>[], budget: Budget | null): Alert | null {
+  if (!budget) return null;
+  const period = latestPeriod(transactions);
+  if (!period) return null;
+
+  const months = periodSpanMonths(transactions, period);
+  const spentByCategory = spendingByCategoryForPeriod(transactions, period);
+  const overCategories = Object.entries(budget)
+    .map(([category, monthlyLimit]) => ({
+      category,
+      limit: monthlyLimit * months,
+      spent: spentByCategory[category] ?? 0,
+    }))
+    .filter((c) => c.spent > c.limit)
+    .sort((a, b) => b.spent - b.limit - (a.spent - a.limit));
+  if (overCategories.length === 0) return null;
+
+  const worst = overCategories[0];
+  const overBy = worst.spent - worst.limit;
+  const extra = overCategories.length - 1;
+  return {
+    id: "budget-overspending",
+    title: overCategories.length === 1 ? `Over budget on ${worst.category}` : `Over budget on ${overCategories.length} categories`,
+    message: `${worst.category}: ₹${worst.spent.toLocaleString("en-IN")} spent vs ₹${worst.limit.toLocaleString("en-IN")} budgeted for ${period} (₹${overBy.toLocaleString("en-IN")} over)${extra > 0 ? ` — plus ${extra} more categor${extra === 1 ? "y" : "ies"}` : ""}. Ask the BudgetPlanner for the full breakdown.`,
+    severity: "warning",
+  };
+}
+
+function goalDeadlineApproachingAlert(now: Date, goals: Record<string, unknown>[]): Alert | null {
+  const candidates = goals
+    .map((g) => {
+      const name = typeof g.name === "string" && g.name ? g.name : "goal";
+      const targetDate = typeof g.targetDate === "string" ? g.targetDate : null;
+      const targetAmount = typeof g.targetAmount === "number" ? g.targetAmount : 0;
+      const savedAmount = typeof g.savedAmount === "number" ? g.savedAmount : 0;
+      if (!targetDate || targetAmount <= 0 || savedAmount >= targetAmount) return null;
+
+      const [y, m, d] = targetDate.split("-").map(Number);
+      if (!y || !m || !d) return null;
+      const daysLeft = Math.ceil((new Date(y, m - 1, d).getTime() - now.getTime()) / 86_400_000);
+      if (daysLeft < 0 || daysLeft > GOAL_DEADLINE_REMINDER_DAYS) return null;
+
+      return { name, daysLeft, pct: Math.round((savedAmount / targetAmount) * 100) };
+    })
+    .filter((c): c is { name: string; daysLeft: number; pct: number } => c !== null)
+    .sort((a, b) => a.daysLeft - b.daysLeft);
+  if (candidates.length === 0) return null;
+
+  const soonest = candidates[0];
+  return {
+    id: "goal-deadline-approaching",
+    title: `"${soonest.name}" target date is approaching`,
+    message: `${soonest.daysLeft} day${soonest.daysLeft === 1 ? "" : "s"} left and you're at ${soonest.pct}% funded — ask the GoalTracker whether your current savings rate will get you there in time.`,
+    severity: soonest.daysLeft <= GOAL_DEADLINE_URGENT_DAYS ? "warning" : "info",
+  };
+}
+
+function staleStatementAlert(now: Date, transactions: Record<string, unknown>[]): Alert | null {
+  const period = latestPeriod(transactions);
+  if (!period) return null;
+
+  // Only meaningful for a "YYYY-MM"-shaped period (the calendar-month
+  // fallback, or a clean single-month label the user typed) — a free-text
+  // range like "16 Jul 2026 to 15 Aug 2026" can't be parsed into one date,
+  // so this skips rather than guessing which end of the range to use.
+  const match = /^(\d{4})-(\d{2})$/.exec(period);
+  if (!match) return null;
+  const latestDate = new Date(Number(match[1]), Number(match[2]) - 1, 1);
+  const monthsSince = (now.getFullYear() - latestDate.getFullYear()) * 12 + (now.getMonth() - latestDate.getMonth());
+  if (monthsSince < STALE_STATEMENT_MONTHS) return null;
+
+  return {
+    id: "stale-statement",
+    title: "Your bank statements haven't been updated in a while",
+    message: `Your most recent saved statement covers ${period} (${monthsSince} months ago) — upload a fresh one so spending and budget answers stay accurate.`,
     severity: "info",
   };
 }

@@ -27,13 +27,13 @@ was asked about but there's no data to compute against (still handled with
 an honest, plain sentence, not a None-shaped silence).
 """
 
-import asyncio
 import json
+import time
 
-from pydantic import BaseModel
+from openai import OpenAI
 
-from agents.agent_framework_llm import agent_complete
 from agents.conversation import format_conversation_for_prompt
+from agents.llm_metrics import record_from_response
 from agents.state import PayNexusState
 from agents.tables import resolve_selected_tables
 from analytics.goal_progress import (
@@ -54,18 +54,7 @@ from tax_slabs import (
 )
 from whatif_extraction import extract_scenario, has_any_signal
 
-
-class WhatIfAgentResponse(BaseModel):
-    """See agents/agent_framework_llm.py's module docstring. Covers this
-    node's own final narration call — whatif_extraction.py's separate
-    one-shot extract_scenario() call now also goes through agent_complete()
-    (migrated 2026-09-12, see that module's own docstring), just with its
-    own response model (_ExtractedScenario), since it's a different call
-    with a different shape, not this one."""
-
-    explanation: str
-    tables: list[str] = []
-    follow_up_suggestions: list[str] = []
+_client = OpenAI(api_key=config.OPENAI_API_KEY)
 
 _SYSTEM_PROMPT = """You are the Foresight Agent inside PayNexus, an Indian personal finance \
 assistant — you explore hypothetical "what if" scenarios. You are given one or more computed \
@@ -99,13 +88,9 @@ def whatif_agent_node(state: PayNexusState) -> dict:
     goal_names = [g["name"] for g in goals if isinstance(g.get("name"), str)]
     conversation = state.get("conversation") or []
 
-    scenario, extraction_metrics = asyncio.run(extract_scenario(state["user_query"], conversation, goal_names))
+    scenario = extract_scenario(state["user_query"], conversation, goal_names)
 
     if not has_any_signal(scenario):
-        # extraction_metrics is included even here — this IS the only real
-        # (billed) call this turn makes; leaving it out (the old behavior)
-        # made a genuine extraction cost invisible in token_usage. See
-        # whatif_extraction.py's module docstring for the full story.
         return {
             "scenario_response": json.dumps(
                 {
@@ -114,8 +99,7 @@ def whatif_agent_node(state: PayNexusState) -> dict:
                     "cut my Food & Dining budget by ₹1,000.\"",
                     "follow_up_suggestions": [],
                 }
-            ),
-            "scenario_llm_calls": [extraction_metrics],
+            )
         }
 
     payslip_history = state.get("payslip_history") or []
@@ -147,19 +131,24 @@ def whatif_agent_node(state: PayNexusState) -> dict:
     prompt_parts.append(f"Question: {state['user_query']}")
     user_prompt = "\n\n".join(prompt_parts)
 
-    raw, metrics = asyncio.run(
-        agent_complete(
-            _SYSTEM_PROMPT,
-            user_prompt,
-            model=config.WHATIF_AGENT_MODEL,
-            response_model=WhatIfAgentResponse,
-            agent="whatif_agent",
-        )
+    start = time.perf_counter()
+    response = _client.chat.completions.create(
+        model=config.WHATIF_AGENT_MODEL,
+        messages=[
+            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ],
+        response_format={"type": "json_object"},
     )
+    latency_ms = (time.perf_counter() - start) * 1000
+    metrics = record_from_response(
+        agent="whatif_agent", model=config.WHATIF_AGENT_MODEL, response=response, latency_ms=latency_ms
+    )
+    raw = response.choices[0].message.content or "{}"
     return {
         "scenario_response": raw,
         "scenario_tables": resolve_selected_tables(raw, available_tables),
-        "scenario_llm_calls": [extraction_metrics, metrics],
+        "scenario_llm_calls": [metrics],
     }
 
 

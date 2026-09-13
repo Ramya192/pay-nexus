@@ -9,6 +9,7 @@ never sees this shape, only tax_calculations.py operating on the copy the
 client sends fresh into each /chat call (same trust tier as payslip_data):
     {
       "elssMutualFunds": number,       # annual investment — 80C
+      "ppf": number,                   # annual PPF contribution — 80C
       "otherMutualFunds": number,      # not deduction-relevant, capital-gains context only
       "stocks": number,                # not deduction-relevant, capital-gains context only
       "fdPrincipal": number,

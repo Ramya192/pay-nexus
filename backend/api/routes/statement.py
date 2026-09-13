@@ -1,35 +1,23 @@
 """
-POST /statement/parse, POST /statement/categorize-manual,
-POST /statement/save, DELETE /statement/{id}, GET /statement/list —
-SpendingAnalyser, V2. Same split as payslip.py: /parse and
-/categorize-manual are plaintext in, plaintext out, nothing persisted;
-/save and /list are ciphertext in, ciphertext out.
+POST /statement/parse, POST /statement/save, DELETE /statement/{id},
+GET /statement/list — SpendingAnalyser, V2. Same split as payslip.py:
+/parse is plaintext in, plaintext out, nothing persisted; /save and /list
+are ciphertext in, ciphertext out.
 
 POST /save rejects a second save for a (user, source_account, period_label)
 triple already on file with 409, same reasoning as payslip.py's month
 dedup — the two plaintext fields the server sees are enough to catch a
 duplicate upload without ever looking at a transaction description or
 amount.
-
-/categorize-manual exists for manual cash-transaction entry — a single
-hand-typed row instead of an uploaded statement — and for the credit-card
-billing-cycle feature's synthetic "bill payment" transaction; neither goes
-through /parse's CSV/PDF extraction since there's nothing to extract, but
-both still need the same categorize_transactions()/make_transaction_id()
-treatment every other transaction gets. The frontend persists the result
-via the existing /save (new entry) or /{id} PUT (appending to one already
-saved this month) — this route itself never touches the database.
 """
 
 import base64
-from datetime import date as _date
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from api.models.statement import (
-    ManualTransactionRequest,
     StatementFull,
     StatementOut,
     StatementParseRequest,
@@ -42,7 +30,6 @@ from categorization.categorize import categorize_transactions
 from db.database import get_db
 from db.models import BankStatement, User
 from ingestion.csv_parser import parse_csv_text
-from models import Transaction, make_transaction_id
 from security.auth import get_current_user
 from statement_extraction import extract_transactions_from_text
 
@@ -88,48 +75,6 @@ def parse_statement(
         ],
         skipped_row_count=skipped_row_count,
         truncated_chars=truncated_chars,
-    )
-
-
-@router.post("/categorize-manual", response_model=TransactionOut)
-def categorize_manual_transaction(
-    body: ManualTransactionRequest,
-    _user: User = Depends(get_current_user),
-) -> TransactionOut:
-    """A hand-entered cash transaction, structured passthrough rather than
-    the /parse extraction pipeline — the user already typed the fields, so
-    there's nothing to extract, just the same categorization step every
-    other ingestion path gets. Stateless, nothing persisted, same tier as
-    /parse — the frontend saves the result itself via the existing /save
-    or /{id} PUT route, exactly like a parsed statement's review list."""
-    try:
-        txn_date = _date.fromisoformat(body.date)
-    except ValueError:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "date must be YYYY-MM-DD.") from None
-
-    txn = Transaction(
-        transaction_id=make_transaction_id(
-            txn_date, body.description, body.amount, body.source_account, body.occurrence
-        ),
-        date=txn_date,
-        description=body.description,
-        amount=body.amount,
-        source_account=body.source_account,
-    )
-    if body.category:
-        txn.category = body.category
-        txn.category_source = "user_corrected"
-    else:
-        categorize_transactions([txn])
-
-    return TransactionOut(
-        transaction_id=txn.transaction_id,
-        date=txn.date.isoformat(),
-        description=txn.description,
-        amount=txn.amount,
-        source_account=txn.source_account,
-        category=txn.category,
-        category_source=txn.category_source,
     )
 
 

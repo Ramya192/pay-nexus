@@ -29,6 +29,18 @@ class ChatRequest(BaseModel):
     # history" resolve against the question asked a moment ago instead of
     # being classified in total isolation.
     conversation: list[dict] | None = None
+    # V2 — decrypted client-side from every saved BankStatement (GET
+    # /statement/list), same trust tier as payslip_data above. Each item
+    # matches models.Transaction's shape.
+    transactions: list[dict] | None = None
+    # V2 — decrypted client-side from every saved Goal (GET /goals), same
+    # trust tier as payslip_data above. Each item matches
+    # frontend/src/store/goalStore.ts's Goal shape.
+    goals: list[dict] | None = None
+    # V2 — decrypted client-side from GET /budget, same trust tier as
+    # financial_profile above. {category: amount}, matches
+    # frontend/src/store/budgetStore.ts's Budget shape.
+    budgets: dict | None = None
 
 
 class SummarizeRequest(BaseModel):

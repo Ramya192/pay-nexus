@@ -22,7 +22,7 @@ export function ChatInput({
       <input
         value={value}
         onChange={(e: ChangeEvent<HTMLInputElement>) => setValue(e.target.value)}
-        placeholder="Why did my take-home drop this month?"
+        placeholder="Am I on the best tax regime for me?"
         disabled={disabled}
         className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
       />
