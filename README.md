@@ -9,11 +9,18 @@ behind a LangGraph orchestrator.
 **Live**: [nice-desert-0837ea310.7.azurestaticapps.net](https://nice-desert-0837ea310.7.azurestaticapps.net)
 (frontend) · `paynexus-api.azurewebsites.net` (backend API)
 
-**V2** — a larger 7-agent version adding bank statements, budgeting, savings goals, and scenario
-planning on top of this same payslip/tax core — is live separately at
+**V2** added four more agents — bank statements, budgeting, savings goals, and scenario planning —
+on top of this same payslip/tax core, still on the same LangGraph + direct-OpenAI design as this
+build. It shipped, was live-verified, and was later retired: its branch (`v2-dev`) was deleted from
+GitHub on 2026-09-13 once **V2.1** fully caught up. Its own README (in the local `paynexus-v2`
+folder, not on GitHub anymore) tells that chapter's story.
+
+**V2.1** rebuilt V2's agent layer onto Microsoft's **Agent Framework**, running against **Azure AI
+Foundry** instead of calling OpenAI directly — this is the current, actively developed version, and
+what's actually live today at
 [ambitious-pebble-083cdaf10.7.azurestaticapps.net](https://ambitious-pebble-083cdaf10.7.azurestaticapps.net)
-· `paynexus-api-v2.azurewebsites.net`, built on the `v2-dev` branch of the same repo
-([`Ramya192/pay-nexus`](https://github.com/Ramya192/pay-nexus/tree/v2-dev)).
+· `paynexus-api-v2.azurewebsites.net`, on the `foundry-v2` branch of this same repo
+([`Ramya192/pay-nexus`](https://github.com/Ramya192/pay-nexus/tree/foundry-v2)).
 
 ## Architecture
 
