@@ -1,0 +1,9 @@
+{
+  "name": "run-paynexus-driver",
+  "private": true,
+  "type": "module",
+  "description": "Standalone Playwright driver for the run-paynexus skill — deliberately not a dependency of the app's own frontend/package.json, so agent-tooling deps never leak into the product build.",
+  "dependencies": {
+    "playwright": "^1.56.0"
+  }
+}
