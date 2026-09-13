@@ -9,6 +9,7 @@ Azure credentials, no cost.
 
 import asyncio
 
+import pytest
 from pydantic import BaseModel
 
 from agents import agent_framework_llm
@@ -124,3 +125,172 @@ class TestRetryOnSuspiciousResponse:
 
         assert len(fake.calls) == 2  # exactly one retry, not more
         assert raw == bad2.model_dump_json()  # the retry's result is used regardless
+
+
+class TestFoundryCallTimeout:
+    """Real, observed root cause (2026-09-11): a slow/hung Foundry call had
+    no timeout anywhere, so it just hung the whole request forever — no
+    error, no fallback. This is the first deterministic, offline
+    reproduction of that failure mode and the fix (_run_with_timeout).
+
+    All tests here patch the backoff constants down to near-zero — the real
+    defaults (1.5s base + up to 1.5s jitter, per attempt) are deliberately
+    sized for real Foundry contention, not for keeping an offline unit test
+    fast; see _run_with_timeout's docstring for why they're non-zero at all."""
+
+    @pytest.fixture(autouse=True)
+    def _fast_backoff(self, monkeypatch):
+        monkeypatch.setattr(agent_framework_llm, "_TIMEOUT_RETRY_BACKOFF_BASE_S", 0.01)
+        monkeypatch.setattr(agent_framework_llm, "_TIMEOUT_RETRY_BACKOFF_JITTER_S", 0.0)
+
+    def test_a_call_that_always_times_out_raises_foundry_unavailable_after_the_retry(self, monkeypatch):
+        """Both the original attempt AND the built-in automatic retry see
+        the same permanently-slow fake — exercises the "genuinely
+        exhausted, not just unlucky once" path, and asserts the SPECIFIC
+        exception type (not just any TimeoutError) so api/routes/chat.py's
+        dedicated high-demand message stays reachable if this ever
+        regresses."""
+        canned = _DummyResponse(explanation="never actually returned in time, with ₹1")
+        fake = FakeChatClient(canned, delay_seconds=999)
+        monkeypatch.setattr(agent_framework_llm, "_clients", {"gpt-4.1-mini": fake})
+        monkeypatch.setattr(agent_framework_llm.config, "FOUNDRY_CALL_TIMEOUT_SECONDS", 0.05)
+
+        with pytest.raises(agent_framework_llm.FoundryUnavailableError):
+            asyncio.run(
+                agent_framework_llm.agent_complete(
+                    "system", "user", model="gpt-4o-mini", response_model=_DummyResponse, agent="test_agent"
+                )
+            )
+
+    def test_a_timeout_on_the_first_attempt_recovers_automatically_on_retry(self, monkeypatch):
+        """The actual point of the 2026-09-12 addition, found live: a call
+        that times out once should recover on its own, not force the user
+        to notice the failure and re-ask themselves. First invocation
+        hangs past the timeout; the automatic retry hits a fast, healthy
+        fake and the turn succeeds with no error ever reaching the caller."""
+        good = _DummyResponse(explanation="Your total is ₹1,002,600.")
+        fake = FakeChatClient(good, delay_seconds=0)
+        monkeypatch.setattr(agent_framework_llm, "_clients", {"gpt-4.1-mini": fake})
+        monkeypatch.setattr(agent_framework_llm.config, "FOUNDRY_CALL_TIMEOUT_SECONDS", 0.05)
+
+        invocation_count = {"n": 0}
+
+        async def _slow_first_invocation_only(*, messages, stream, options, **kwargs):
+            invocation_count["n"] += 1
+            if invocation_count["n"] == 1:
+                await asyncio.sleep(999)
+            return await FakeChatClient._inner_get_response(fake, messages=messages, stream=stream, options=options, **kwargs)
+
+        monkeypatch.setattr(fake, "_inner_get_response", _slow_first_invocation_only)
+
+        raw, _ = asyncio.run(
+            agent_framework_llm.agent_complete(
+                "system", "user", model="gpt-4o-mini", response_model=_DummyResponse, agent="test_agent"
+            )
+        )
+
+        assert raw == good.model_dump_json()
+        assert invocation_count["n"] == 2  # confirms the retry actually happened, not a fluke first-attempt pass
+
+    def test_a_hung_content_retry_call_also_times_out(self, monkeypatch):
+        """The retry-on-suspicious-response path (agent_complete's second
+        runner.run(), triggered by bad CONTENT — a different mechanism
+        from this file's own timeout-retry) needs the same timeout guard
+        as the first call — a slow content-retry shouldn't be able to hang
+        forever just because it's already past the first call."""
+        bad = _DummyResponse(explanation="Based on your data.")  # no rupee figure — triggers the content retry
+        fake = FakeChatClient(bad, delay_seconds=0)
+        monkeypatch.setattr(agent_framework_llm, "_clients", {"gpt-4.1-mini": fake})
+        monkeypatch.setattr(agent_framework_llm.config, "FOUNDRY_CALL_TIMEOUT_SECONDS", 0.05)
+
+        async def _slow_after_first(*, messages, stream, options, **kwargs):
+            if fake.calls:  # first call already recorded → this is the content-retry
+                await asyncio.sleep(999)
+            return await FakeChatClient._inner_get_response(fake, messages=messages, stream=stream, options=options, **kwargs)
+
+        monkeypatch.setattr(fake, "_inner_get_response", _slow_after_first)
+
+        with pytest.raises(agent_framework_llm.FoundryUnavailableError):
+            asyncio.run(
+                agent_framework_llm.agent_complete(
+                    "system", "user", model="gpt-4o-mini", response_model=_DummyResponse, agent="test_agent"
+                )
+            )
+
+    def test_a_fast_call_within_the_timeout_is_unaffected(self, monkeypatch):
+        canned = _DummyResponse(explanation="Your total is ₹1,002,600.")
+        fake = FakeChatClient(canned, delay_seconds=0.01)
+        monkeypatch.setattr(agent_framework_llm, "_clients", {"gpt-4.1-mini": fake})
+        monkeypatch.setattr(agent_framework_llm.config, "FOUNDRY_CALL_TIMEOUT_SECONDS", 5)
+
+        raw, _ = asyncio.run(
+            agent_framework_llm.agent_complete(
+                "system", "user", model="gpt-4o-mini", response_model=_DummyResponse, agent="test_agent"
+            )
+        )
+
+        assert raw == canned.model_dump_json()
+
+
+class TestWebSearchCompleteText:
+    """Real, live bug (2026-09-12, found via code inspection, not a test
+    failure — no prior test exercised this function at all): this call
+    site was missed when the other 4 _run_with_timeout call sites were
+    converted from a bare coroutine to a coro_factory lambda, so it passed
+    `runner.run(user_prompt)` — an already-created coroutine — straight
+    through as `coro_factory`. `_run_with_timeout` then does
+    `coro_factory()`, which raises `TypeError: 'coroutine' object is not
+    callable` on every single call, before any real network request even
+    happens. This would have made the regulatory agent's entire
+    web-search-fallback path (module docstring's "live web-search fallback
+    for a genuine RAG miss") unconditionally crash instead of ever
+    answering a RAG-miss question — the exact code path this session was
+    hardening. First test of web_search_complete_text at all."""
+
+    @pytest.fixture(autouse=True)
+    def _fast_backoff(self, monkeypatch):
+        monkeypatch.setattr(agent_framework_llm, "_TIMEOUT_RETRY_BACKOFF_BASE_S", 0.01)
+        monkeypatch.setattr(agent_framework_llm, "_TIMEOUT_RETRY_BACKOFF_JITTER_S", 0.0)
+
+    def test_a_fast_web_search_call_returns_the_canned_answer(self, monkeypatch):
+        fake = FakeChatClient("Found it: see pib.gov.in.", delay_seconds=0.01)
+        monkeypatch.setattr(agent_framework_llm, "_clients", {"gpt-4o": fake})
+        monkeypatch.setattr(agent_framework_llm.config, "FOUNDRY_WEB_SEARCH_TIMEOUT_SECONDS", 5)
+
+        text, metrics = asyncio.run(
+            agent_framework_llm.web_search_complete_text(
+                "system", "user", agent="regulatory_agent", allowed_domains=["pib.gov.in"]
+            )
+        )
+
+        assert text == "Found it: see pib.gov.in."
+        assert metrics.agent == "regulatory_agent"
+
+    def test_a_web_search_call_that_times_out_once_still_recovers_via_retry(self, monkeypatch):
+        """Proves coro_factory() is actually re-invocable here (a fresh
+        coroutine per attempt) — the exact thing a bare coroutine object
+        can't do, and the reason this call site's bug would have broken
+        the retry, not just the happy path."""
+        good = "Found it on the retry."
+        fake = FakeChatClient(good, delay_seconds=0)
+        monkeypatch.setattr(agent_framework_llm, "_clients", {"gpt-4o": fake})
+        monkeypatch.setattr(agent_framework_llm.config, "FOUNDRY_WEB_SEARCH_TIMEOUT_SECONDS", 0.05)
+
+        invocation_count = {"n": 0}
+
+        async def _slow_first_invocation_only(*, messages, stream, options, **kwargs):
+            invocation_count["n"] += 1
+            if invocation_count["n"] == 1:
+                await asyncio.sleep(999)
+            return await FakeChatClient._inner_get_response(fake, messages=messages, stream=stream, options=options, **kwargs)
+
+        monkeypatch.setattr(fake, "_inner_get_response", _slow_first_invocation_only)
+
+        text, _ = asyncio.run(
+            agent_framework_llm.web_search_complete_text(
+                "system", "user", agent="regulatory_agent", allowed_domains=["pib.gov.in"]
+            )
+        )
+
+        assert text == good
+        assert invocation_count["n"] == 2

@@ -23,9 +23,20 @@ export interface ChatMessage {
   tokenUsage?: TokenUsage;
 }
 
+export interface QueuedQuestion {
+  id: string;
+  text: string;
+}
+
 interface ChatState {
   messages: ChatMessage[];
   activeAgents: string[]; // currently-reasoning agents, for AgentIndicator
+  // Follow-up questions typed while a turn is still in flight — ChatInterface
+  // runs them one at a time (FIFO) instead of firing concurrent turns against
+  // the same conversation state. See ChatInterface.tsx's runTurn/handleSend.
+  // Each has its own id (not just the raw text) so a specific queued item can
+  // be individually cancelled — see removeFromQueue.
+  queue: QueuedQuestion[];
   addMessage: (m: ChatMessage) => void;
   addActiveAgent: (agent: string) => void;
   clearActiveAgents: () => void;
@@ -36,13 +47,21 @@ interface ChatState {
     tables?: TableData[],
     tokenUsage?: TokenUsage
   ) => void;
+  enqueue: (text: string) => void;
+  /** Pops and returns the oldest queued question, or undefined if empty. */
+  dequeue: () => string | undefined;
+  /** Removes one specific not-yet-started queued question (the Stop button
+   * only ever cancels whichever turn is CURRENTLY running — this is the
+   * only way to retract a queued one without touching that turn). */
+  removeFromQueue: (id: string) => void;
   reset: () => void;
 }
 
-export const useChatStore = create<ChatState>((set) => ({
+export const useChatStore = create<ChatState>((set, get) => ({
   messages: [],
   activeAgents: [],
-  reset: () => set({ messages: [], activeAgents: [] }),
+  queue: [],
+  reset: () => set({ messages: [], activeAgents: [], queue: [] }),
   addMessage: (m) => set((s) => ({ messages: [...s.messages, m] })),
   addActiveAgent: (agent) =>
     set((s) => (s.activeAgents.includes(agent) ? s : { activeAgents: [...s.activeAgents, agent] })),
@@ -56,4 +75,11 @@ export const useChatStore = create<ChatState>((set) => ({
       }
       return { messages };
     }),
+  enqueue: (text) => set((s) => ({ queue: [...s.queue, { id: crypto.randomUUID(), text }] })),
+  dequeue: () => {
+    const [next, ...rest] = get().queue;
+    if (next !== undefined) set({ queue: rest });
+    return next?.text;
+  },
+  removeFromQueue: (id) => set((s) => ({ queue: s.queue.filter((q) => q.id !== id) })),
 }));

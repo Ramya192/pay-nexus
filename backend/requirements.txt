@@ -25,7 +25,10 @@ uvicorn[standard]>=0.30
 agent-framework-core==1.14.0
 agent-framework-foundry==1.11.0
 agent-framework-openai==1.13.0
-agent-framework-orchestrations==1.1.0
+# agent-framework-orchestrations removed 2026-09-11 — its ConcurrentBuilder
+# deadlocked for real, live, under uvicorn with 2 real concurrent agents
+# (see agents/orchestrator_v2.py's module docstring); replaced with plain
+# asyncio.gather, confirmed zero remaining imports before removing.
 azure-identity==1.25.3          # DefaultAzureCredential
 azure-ai-projects==2.3.0        # AIProjectClient, wrapped by agent-framework-foundry
 
@@ -44,6 +47,7 @@ python-jose[cryptography]>=3.3   # the [cryptography] extra also covers security
 python-dotenv>=1.0
 pydantic[email]>=2.8          # EmailStr validation on auth request schemas — [email] extra already includes pydantic itself
 bcrypt>=4.0                   # login password hashing (security/auth.py calls it directly, not via passlib)
+tiktoken>=0.7                 # compression/token_budget.py's pre-call token estimate for capacity-aware context trimming — falls back to a chars/4 estimate if unavailable, never used for real cost tracking (llm_metrics.py stays the source of truth for that)
 
 # Local SLM path (USE_LOCAL_SLM=True) — talks to a locally running Ollama server
 # via langchain-ollama, not a Python dependency of Ollama itself.

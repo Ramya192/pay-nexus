@@ -1,17 +1,19 @@
 """
-Tests for agents/orchestrator_v2.py — the ConcurrentBuilder-based
-replacement for orchestrator.py's LangGraph fan-out/fan-in.
+Tests for agents/orchestrator_v2.py — the asyncio.gather-based replacement
+for orchestrator.py's LangGraph fan-out/fan-in (an earlier version used
+agent_framework_orchestrations' ConcurrentBuilder for execution; see
+orchestrator_v2.py's module docstring for why that was replaced — it
+deadlocked for real, live, under uvicorn, with 2 real concurrent agents).
 
 Most tests here use FAKE node functions (via run_paynexus_workflow's
 agent_node_map override) instead of the real 7 agents — this suite is about
-proving the ORCHESTRATION MECHANISM itself (concurrent fan-out, JSON
-smuggling through AgentExecutorResponse message text, merging into
-assembler_node) works correctly, not re-testing each agent's own narration
-quality (already covered by tests/test_<agent>_agent.py and
+proving the ORCHESTRATION MECHANISM itself (concurrent fan-out, merging
+into assembler_node) works correctly, not re-testing each agent's own
+narration quality (already covered by tests/test_<agent>_agent.py and
 tests/test_orchestrator_assembler.py, which this reuses unchanged).
 classify_intent is monkeypatched in these — it's the one real-LLM-calling
-piece — except in the single @pytest.mark.integration test at the bottom,
-which exercises the real thing end to end.
+piece — except in the @pytest.mark.integration tests at the bottom, which
+exercise the real thing end to end.
 """
 
 import asyncio
@@ -19,7 +21,9 @@ import asyncio
 import pytest
 
 from agents.llm_metrics import LLMCallMetrics
-from agents.orchestrator_v2 import run_paynexus_workflow, stream_paynexus_workflow
+from agents.orchestrator_v2 import _context_window_for_turn, run_paynexus_workflow, stream_paynexus_workflow
+from compression import token_budget
+from config import config
 
 _FAKE_METRICS = LLMCallMetrics(agent="orchestrator_classifier", model="gpt-4o", input_tokens=10, output_tokens=5, cost_usd=0.0, latency_ms=1.0)
 
@@ -39,6 +43,49 @@ def _fake_classify(agent_keys):
 def _run(state, agent_node_map, agent_keys, monkeypatch):
     monkeypatch.setattr("agents.orchestrator_v2.classify_intent", _fake_classify(agent_keys))
     return asyncio.run(run_paynexus_workflow(state, agent_node_map=agent_node_map))
+
+
+class TestContextWindowForTurn:
+    """_context_window_for_turn — the "which real capacity ceiling applies
+    this turn" resolution that classify_intent sizes its dynamic
+    compression pass against. Pure function, no LLM/network call."""
+
+    def test_cloud_only_agent_uses_its_own_deployment_window(self, monkeypatch):
+        monkeypatch.setattr(config, "USE_LOCAL_SLM", False)
+        window, model = _context_window_for_turn(["payslip"])  # gpt-4o, cloud-only agent
+        assert model == "gpt-4o"
+        assert window == token_budget.context_window_for("gpt-4o")
+
+    def test_hybrid_agent_with_local_slm_off_uses_its_cloud_deployment(self, monkeypatch):
+        monkeypatch.setattr(config, "USE_LOCAL_SLM", False)
+        window, model = _context_window_for_turn(["nudge"])
+        # NUDGE_AGENT_MODEL is "gpt-4o-mini", mapped via FOUNDRY_DEPLOYMENT_MAP
+        # to the real Foundry deployment behind it.
+        assert model == config.FOUNDRY_DEPLOYMENT_MAP["gpt-4o-mini"]
+        assert window == token_budget.context_window_for(model)
+
+    def test_hybrid_agent_with_local_slm_on_is_limited_by_phi4_mini(self, monkeypatch):
+        monkeypatch.setattr(config, "USE_LOCAL_SLM", True)
+        window, model = _context_window_for_turn(["nudge"])
+        assert model == "phi4-mini"
+        assert window == token_budget.context_window_for("phi4-mini")
+        assert window < token_budget.context_window_for(config.FOUNDRY_DEPLOYMENT_MAP["gpt-4o-mini"])
+
+    def test_mixed_turn_picks_the_tightest_of_all_selected_agents(self, monkeypatch):
+        monkeypatch.setattr(config, "USE_LOCAL_SLM", True)
+        # payslip (gpt-4o, cloud-only) + nudge (hybrid, phi4-mini-eligible
+        # while USE_LOCAL_SLM is on) selected together — the real ceiling
+        # for the SHARED conversation/session_history both receive must be
+        # the smaller of the two, not whichever agent happens to be listed
+        # first.
+        window, model = _context_window_for_turn(["payslip", "nudge"])
+        assert model == "phi4-mini"
+        assert window == token_budget.context_window_for("phi4-mini")
+
+    def test_empty_agent_keys_falls_back_to_payslip_model(self):
+        window, model = _context_window_for_turn([])
+        assert model == config.PAYSLIP_AGENT_MODEL
+        assert window == token_budget.context_window_for(config.PAYSLIP_AGENT_MODEL)
 
 
 class TestConcurrentFanOut:
@@ -91,20 +138,19 @@ class TestConcurrentFanOut:
         _run({"user_query": "a very specific real question"}, {"budget": fake_budget}, ["budget"], monkeypatch)
         assert seen_queries == ["a very specific real question"]
 
-    def test_llm_call_metrics_and_tables_survive_the_json_round_trip(self, monkeypatch):
-        """The real risk in this design (see module docstring): each
-        executor JSON-encodes its result dict, including a nested
-        LLMCallMetrics Pydantic object and a table dict, to smuggle it
-        through AgentExecutorResponse's message text. Confirms none of that
-        gets lost or corrupted crossing that boundary.
-
-        Uses 2 agent keys (not 1) specifically to force the real
-        ConcurrentBuilder ->  AgentExecutorResponse -> JSON-text -> aggregator
-        path — the single-agent case takes a short-circuit that never
-        touches that boundary at all (a real gap this test used to have:
-        it only ever exercised the short-circuit, and genuinely missed a
-        real bug — LLMCallMetrics decoding back as a plain dict, not a
-        model instance — that only the true concurrent path hit)."""
+    def test_llm_call_metrics_and_tables_survive_concurrent_merge(self, monkeypatch):
+        """Confirms a nested LLMCallMetrics Pydantic object and a table dict
+        both survive _run_agents_concurrently's merge (a plain dict.update()
+        per agent, then assembler_node) intact — real 2-agent case, not the
+        1-agent case, so the merge loop genuinely runs over >1 result.
+        (An earlier version of this design round-tripped every result
+        through JSON text to cross agent_framework_orchestrations'
+        ConcurrentBuilder — see orchestrator_v2.py's module docstring for
+        why that's gone. That boundary is exactly where a real bug was once
+        found — LLMCallMetrics decoding back as a plain dict, not a model
+        instance — so this test's job is the same even though the
+        mechanism it's now checking is a plain dict merge, not a
+        serialization round trip.)"""
         metrics = LLMCallMetrics(agent="budget_agent", model="gpt-4.1-mini", input_tokens=100, output_tokens=50, cost_usd=0.001, latency_ms=200)
         table = {"title": "Budget vs actual", "headers": ["Category", "Spent"], "rows": [["Food", "2,500"]]}
 
@@ -222,11 +268,10 @@ def test_real_streaming_end_to_end():
 
 @pytest.mark.integration
 def test_real_end_to_end_single_agent_question():
-    """The one test in this file that makes real calls (classify_intent +
-    budget_agent, both against the real Foundry deployment) — proves the
-    whole pipeline (real classification -> real ConcurrentBuilder workflow
-    -> real assembler_node) works end to end, not just with fakes standing
-    in for each piece."""
+    """Makes real calls (classify_intent + budget_agent, both against the
+    real Foundry deployment) — proves the whole pipeline (real
+    classification -> real concurrent fan-out -> real assembler_node)
+    works end to end, not just with fakes standing in for each piece."""
     state = {
         "user_query": "Am I over budget this month?",
         "budgets": {"Food & Dining": 2000},
@@ -244,10 +289,14 @@ def test_real_end_to_end_single_agent_question():
 
 @pytest.mark.integration
 def test_real_end_to_end_multi_agent_question():
-    """Same as above but forces the real ConcurrentBuilder fan-out path
-    (2 real agents, not the single-agent short-circuit) — proves the
-    genuine concurrent-execution branch works end to end against real
-    agents, not just the fakes in TestConcurrentFanOut."""
+    """Same as above but forces a real 2-agent turn — proves the genuine
+    concurrent-execution path (asyncio.gather over 2 real agents) works end
+    to end, not just with the fakes in TestConcurrentFanOut. This exact
+    2-real-agent shape is also what live-reproduced the ConcurrentBuilder
+    deadlock this module's docstring describes; this test guards against
+    that class of regression recurring, though it can't itself detect a
+    hang under uvicorn specifically (see the module docstring — the
+    deadlock didn't reproduce in a plain asyncio.run() script either)."""
     state = {
         "user_query": "Am I over budget, and how is my Emergency Fund goal progressing?",
         "budgets": {"Food & Dining": 2000},

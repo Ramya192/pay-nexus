@@ -45,6 +45,35 @@ class TestCompressInSession:
         assert compress_in_session(exchanges) == exchanges
 
 
+class TestCompressInSessionDynamic:
+    """headroom_tokens given — the capacity-aware mode (2026-09-12), sized
+    against a real context window instead of the old flat _SLIDING_WINDOW."""
+
+    def test_generous_headroom_keeps_more_than_the_old_fixed_window(self):
+        exchanges = [{"query": f"q{i}", "response": f"a{i}"} for i in range(10)]
+        result = compress_in_session(exchanges, headroom_tokens=100_000)
+        assert len(result) > _SLIDING_WINDOW
+        assert result == exchanges[-len(result):]  # still a suffix — oldest dropped first
+
+    def test_tiny_headroom_still_keeps_the_floor(self):
+        exchanges = [{"query": "a very long question " * 50, "response": "a very long answer " * 50}] * 5
+        result = compress_in_session(exchanges, headroom_tokens=1)
+        assert len(result) == 1
+        assert result[0] == exchanges[-1]
+
+    def test_never_exceeds_the_dynamic_ceiling(self):
+        exchanges = [{"query": f"q{i}", "response": f"a{i}"} for i in range(50)]
+        result = compress_in_session(exchanges, headroom_tokens=10_000_000)
+        from compression.context_compressor import _MAX_KEPT_EXCHANGES
+
+        assert len(result) == _MAX_KEPT_EXCHANGES
+
+    def test_disabled_ignores_headroom_and_returns_everything(self, monkeypatch):
+        monkeypatch.setattr(config, "ENABLE_CONTEXT_COMPRESSION", False)
+        exchanges = [{"query": f"q{i}", "response": f"a{i}"} for i in range(10)]
+        assert compress_in_session(exchanges, headroom_tokens=1) == exchanges
+
+
 class TestCapSessionHistory:
     def test_keeps_only_most_recent_n(self):
         # newest-first, per GET /payslip/history ordering — a head-slice,
@@ -73,6 +102,50 @@ class TestCapSessionHistory:
         result = cap_session_history(history)
         assert "payslip_snapshot" not in result[0]
         assert result[0]["payslip_month"] == "2026-03"
+
+
+class TestCapSessionHistoryDynamic:
+    """headroom_tokens given — same capacity-aware mode as
+    TestCompressInSessionDynamic, mirrored for the newest-first
+    session_history ordering (see cap_session_history's own docstring for
+    why it reverses before/after calling trim_to_headroom)."""
+
+    def test_generous_headroom_still_respects_the_max_sessions_ceiling(self):
+        # Unlike compress_in_session's dynamic ceiling (_MAX_KEPT_EXCHANGES,
+        # deliberately higher than the old fixed _SLIDING_WINDOW),
+        # cap_session_history's dynamic ceiling reuses _MAX_SESSIONS itself
+        # (see context_compressor.py's comment on _MAX_KEPT_SESSIONS) — so
+        # generous headroom reaches that same cap, not more than it.
+        history = [{"session": i} for i in range(20)]
+        result = cap_session_history(history, headroom_tokens=100_000)
+        assert len(result) == _MAX_SESSIONS
+        assert result == history[:_MAX_SESSIONS]  # still newest-first, still a prefix
+
+    def test_tight_headroom_keeps_fewer_than_the_fixed_cap(self):
+        # This is where the dynamic mode actually differs from the fixed
+        # one for session summaries — trimming BELOW _MAX_SESSIONS when
+        # headroom genuinely doesn't stretch that far, instead of always
+        # keeping exactly _MAX_SESSIONS regardless of size.
+        history = [{"session": i, "key_changes": ["a fairly long note here"] * 20} for i in range(20)]
+        result = cap_session_history(history, headroom_tokens=200)
+        assert 0 < len(result) < _MAX_SESSIONS
+        assert result == history[: len(result)]
+
+    def test_tiny_headroom_still_keeps_the_floor_and_the_newest_one(self):
+        history = [{"session": i, "key_changes": ["x"] * 200} for i in range(5)]
+        result = cap_session_history(history, headroom_tokens=1)
+        assert len(result) == 1
+        assert result[0] == history[0]  # newest-first — index 0 is the most recent
+
+    def test_never_exceeds_the_max_sessions_ceiling_even_with_huge_headroom(self):
+        history = [{"session": i} for i in range(50)]
+        result = cap_session_history(history, headroom_tokens=10_000_000)
+        assert len(result) == _MAX_SESSIONS
+
+    def test_disabled_ignores_headroom_and_returns_everything(self, monkeypatch):
+        monkeypatch.setattr(config, "ENABLE_CONTEXT_COMPRESSION", False)
+        history = [{"session": i} for i in range(15)]
+        assert cap_session_history(history, headroom_tokens=1) == history
 
 
 class TestCompressSessionSummaryNoExchanges:

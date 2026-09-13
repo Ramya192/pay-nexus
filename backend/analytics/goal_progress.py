@@ -100,10 +100,15 @@ def format_goals_for_prompt(goals: list[dict], average_monthly_savings: float | 
 
     if average_monthly_savings is not None:
         lines.append(
-            f"Average net savings per statement period on file (income minus expenses, already "
-            f"computed from saved transactions): ₹{average_monthly_savings:,.0f}. Compare this "
-            f"directly against a goal's \"needs ~₹X/month\" figure above to say whether the "
-            f"current pace is enough — do not estimate the pace yourself from category totals."
+            f"Average net savings per real month on file (income minus expenses, already computed "
+            f"from saved transactions and normalized for each statement period's actual length — "
+            f"see analytics/spending_trends.py's average_monthly_net_savings — so this is already a "
+            f"genuine monthly figure, not a raw per-statement-period total): ₹{average_monthly_savings:,.0f}. "
+            f"Compare this directly against a goal's \"needs ~₹X/month\" figure above to say whether "
+            f"the current pace is enough — do not estimate the pace yourself from category totals, "
+            f"and don't call this a \"per period\" figure, since a statement period isn't always "
+            f"exactly one month (e.g. a 46-day statement) and this number has already been "
+            f"converted to a real-month rate."
         )
     else:
         lines.append(
