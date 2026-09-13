@@ -1,0 +1,35 @@
+Budget 2024-25 — Income Tax Highlights for Salaried Employees
+
+Compiled from public secondary sources (newsonair.gov.in press releases, business-standard.com, and
+others), cross-checked across multiple sources — NOT the verbatim Finance Bill text. Presented
+23 July 2024, effective FY 2024-25 (AY 2025-26) unless noted. Superseded on some figures by Budget
+2025-26 (see budget_2025-26_highlights.txt) — where the two conflict, the 2025-26 document's figures
+are more current.
+
+New tax regime slabs (FY 2024-25, before Budget 2025-26's further revision):
+Up to Rs 3,00,000: Nil
+Rs 3,00,001 to Rs 7,00,000: 5 percent
+Rs 7,00,001 to Rs 10,00,000: 10 percent
+Rs 10,00,001 to Rs 12,00,000: 15 percent
+Rs 12,00,001 to Rs 15,00,000: 20 percent
+Above Rs 15,00,000: 30 percent
+
+Standard deduction (new regime): increased from Rs 50,000 to Rs 75,000 — this is the change that
+introduced the current split between the new regime (Rs 75,000) and the unchanged old regime
+(Rs 50,000). Estimated saving of up to Rs 17,500 for a salaried employee under the new regime as a
+direct result of this one change.
+
+Family pension deduction: increased from Rs 15,000 to Rs 25,000.
+
+Employer NPS contribution deduction (Section 80CCD(2)): the deductible share of an employer's NPS
+contribution, for employees under the new regime, was raised from 10% to 14% of salary (basic + DA).
+The old regime's 10% limit was not changed.
+
+TDS on rent (Section 194-IB): the TDS rate on rent payments was reduced to 2% (from 5%), effective
+1 October 2024. (Separately, the ANNUAL THRESHOLD at which TDS on rent applies at all was later
+raised from Rs 2.40 lakh to Rs 6 lakh in Budget 2025-26 — a different change to a different
+parameter of the same provision; see budget_2025-26_highlights.txt.)
+
+Employer PF contribution scheme: a new government-funded direct PF contribution for eligible
+employees earning up to Rs 1 lakh/month, aimed at incentivizing formal-sector hiring for an
+estimated 210 lakh (21 million) young employees.
