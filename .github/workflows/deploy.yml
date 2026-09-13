@@ -9,7 +9,29 @@ on:
     branches: [main]
 
 jobs:
+  test-backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install -r requirements.txt
+
+      # No secrets needed here — @pytest.mark.integration tests (the ones
+      # that hit a real OpenAI/Foundry API or a live pgvector index) are
+      # auto-skipped whenever OPENAI_API_KEY isn't set (tests/conftest.py),
+      # which it deliberately isn't in this job. Everything that runs here
+      # is the free, deterministic unit-test tier.
+      - run: pytest
+
   deploy-backend:
+    needs: test-backend
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

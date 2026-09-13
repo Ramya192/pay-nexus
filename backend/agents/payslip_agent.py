@@ -41,13 +41,13 @@ sum or a single month extrapolated x12 — tax_slabs.estimate_annual_gross_incom
 says which, and the prompt requires disclosing it.
 """
 
+import asyncio
 import json
-import time
 
-from openai import OpenAI
+from pydantic import BaseModel
 
+from agents.agent_framework_llm import agent_complete
 from agents.conversation import format_conversation_for_prompt
-from agents.llm_metrics import record_from_response
 from agents.state import PayNexusState
 from agents.tables import resolve_selected_tables
 from config import config
@@ -63,7 +63,15 @@ from tax_slabs import (
     tax_liability_table,
 )
 
-_client = OpenAI(api_key=config.OPENAI_API_KEY)
+
+class PayslipAgentResponse(BaseModel):
+    """See agents/agent_framework_llm.py's module docstring. Always cloud
+    (agent_complete, not the hybrid variant) — this agent never had an
+    Ollama toggle (accuracy-critical, §2/§14)."""
+
+    explanation: str
+    tables: list[str] = []
+    follow_up_suggestions: list[str] = []
 
 # Matches ManualEntryForm.tsx's field labels — used to build a table
 # straight from the payslip dict itself, same "compute exactly in Python,
@@ -260,20 +268,15 @@ def payslip_agent_node(state: PayNexusState) -> dict:
     prompt_parts.append(f"Question: {state['user_query']}")
     user_prompt = "\n\n".join(prompt_parts)
 
-    start = time.perf_counter()
-    response = _client.chat.completions.create(
-        model=config.PAYSLIP_AGENT_MODEL,
-        messages=[
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ],
-        response_format={"type": "json_object"},
+    raw, metrics = asyncio.run(
+        agent_complete(
+            _SYSTEM_PROMPT,
+            user_prompt,
+            model=config.PAYSLIP_AGENT_MODEL,
+            response_model=PayslipAgentResponse,
+            agent="payslip_agent",
+        )
     )
-    latency_ms = (time.perf_counter() - start) * 1000
-    metrics = record_from_response(
-        agent="payslip_agent", model=config.PAYSLIP_AGENT_MODEL, response=response, latency_ms=latency_ms
-    )
-    raw = response.choices[0].message.content or "{}"
     return {
         "payslip_response": raw,
         "payslip_tables": resolve_selected_tables(raw, available_tables),

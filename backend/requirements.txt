@@ -1,15 +1,34 @@
 # PayNexus backend — pinned loosely by major version; tighten before deploy.
 #
-# langgraph and openai are pinned tighter than the rest below: the original
-# >=0.2 / >=1.40 bounds silently resolved to langgraph 1.2.11 and openai
-# 2.54.0 on a clean install (0.x→1.x and 1.x→2.x major jumps neither pin
-# would have blocked). Both were verified working at those versions
-# end-to-end this session — the tighter bound just stops the *next* major
-# jump from happening silently too.
+# openai is pinned tighter than the rest below: the original >=1.40 bound
+# silently resolved to 2.54.0 on a clean install (a 1.x→2.x major jump the
+# pin wouldn't have blocked) — verified working end-to-end at that version.
+# The tighter bound just stops the *next* major jump from happening
+# silently too.
+#
+# langgraph was removed here during the V2.1 Foundry migration (Phase 4) —
+# agents/orchestrator.py's StateGraph/paynexus_graph was replaced by
+# agents/orchestrator_v2.py's Microsoft Agent Framework ConcurrentBuilder
+# orchestrator; nothing in this codebase imports langgraph anymore
+# (verified via a real grep, not assumed).
 
 fastapi>=0.115
 uvicorn[standard]>=0.30
-langgraph>=1.2,<2.0          # verified on 1.2.11
+
+# --- V2.1: Microsoft Agent Framework + Azure AI Foundry ---
+# Narrow extras only, NOT bare `agent-framework[all]` — that pulls in
+# agent-framework-durabletask/azurefunctions/ag-ui and MCP server support,
+# none of which PayNexus needs, and caused a real, slow pip resolver
+# backtrack (dozens of FastAPI version candidates tried) the one time it
+# was tried against this project. Exact versions pinned — this is a
+# fast-moving SDK; a loose bound risks a breaking change landing silently.
+agent-framework-core==1.14.0
+agent-framework-foundry==1.11.0
+agent-framework-openai==1.13.0
+agent-framework-orchestrations==1.1.0
+azure-identity==1.25.3          # DefaultAzureCredential
+azure-ai-projects==2.3.0        # AIProjectClient, wrapped by agent-framework-foundry
+
 langchain>=0.3
 langchain-community>=0.3
 langchain-postgres>=0.0.9   # PGVector store wrapper

@@ -26,13 +26,29 @@ so this agent's regime opinion must now defer to the real liability
 numbers whenever they're available, not form an independent one.
 """
 
+import asyncio
 import json
 
+from pydantic import BaseModel
+
+from agents.agent_framework_llm import hybrid_agent_complete
 from agents.conversation import format_conversation_for_prompt
-from agents.llm import hybrid_complete
 from agents.state import PayNexusState
 from agents.tables import resolve_selected_tables
 from config import config
+
+
+class NudgeAgentResponse(BaseModel):
+    """Matches this agent's existing {title, detail, impact, tables}
+    contract exactly (agents/orchestrator.py's
+    _parse_nudge/_normalize_impact still do their own parsing of the
+    serialized JSON string this returns — unaffected). `impact` stays
+    optional/nullable, matching the prompt's "or null" instruction."""
+
+    title: str
+    detail: str
+    impact: str | None = None
+    tables: list[str] = []
 from payslip_trends import (
     duplicates_table,
     format_duplicates_for_prompt,
@@ -271,8 +287,14 @@ def nudge_agent_node(state: PayNexusState) -> dict:
     prompt_parts.append(f"Question: {state['user_query']}")
     user_prompt = "\n\n".join(prompt_parts)
 
-    answer, metrics = hybrid_complete(
-        _SYSTEM_PROMPT, user_prompt, model=config.NUDGE_AGENT_MODEL, json_mode=True, agent="nudge_agent"
+    answer, metrics = asyncio.run(
+        hybrid_agent_complete(
+            _SYSTEM_PROMPT,
+            user_prompt,
+            model=config.NUDGE_AGENT_MODEL,
+            response_model=NudgeAgentResponse,
+            agent="nudge_agent",
+        )
     )
     return {
         "nudge_response": answer,
