@@ -29,6 +29,29 @@ back to the transaction's own calendar month only when no statement_period
 was given (e.g. hand-entered transactions, or older saved data from before
 this field existed) — see _period_of below.
 
+Two more dict-only fields, `counts_toward_category_spend` and
+`counts_toward_net_savings` (both default True when absent, so every
+transaction shape that predates this feature is completely unaffected):
+the credit-card billing-cycle feature needs a purchase's REAL date/period to
+drive spending-by-category (you bought groceries in March, categorically,
+regardless of when the card bill gets paid) while NOT letting that same
+purchase double as a cash-flow event in March — the actual money doesn't
+leave the bank until the statement is paid. `_expenses()` filters out any
+transaction with `counts_toward_category_spend: False` (the itemized
+purchases feeding a credit-card statement's own synthetic payment record);
+`net_savings_by_period` filters out any transaction with
+`counts_toward_net_savings: False` (those same itemized purchases again —
+they're not a real cash event on their own). The synthetic "Credit Card
+Bill Payment" transaction a saved credit-card statement also produces sits
+at the opposite corner: `counts_toward_category_spend: False` (it's not a
+new purchase category, it'd double-count the same rupees) but
+`counts_toward_net_savings` left at its True default, dated at the
+statement's real due date — so a Mar 15-Apr 14 statement due May 5th
+correctly reduces MAY's net savings, not March's or April's, while March/
+April's category breakdown still honestly reflects what was actually
+bought. See frontend/src/components/StatementUploader/
+CreditCardStatementUploader.tsx for where these get stamped.
+
 Expenses only (amount < 0) unless noted — income isn't a spending category.
 """
 
@@ -71,7 +94,11 @@ def _period_of(transaction: dict) -> str:
 
 
 def _expenses(transactions: list[dict]) -> list[dict]:
-    return [t for t in transactions if t.get("amount", 0) < 0]
+    return [
+        t
+        for t in transactions
+        if t.get("amount", 0) < 0 and t.get("counts_toward_category_spend", True)
+    ]
 
 
 def spending_by_category(transactions: list[dict]) -> list[CategoryTotal]:
@@ -105,9 +132,17 @@ def net_savings_by_period(transactions: list[dict]) -> list[PeriodTotal]:
     spending_by_period, this includes income rows on purpose: "how much did
     I actually save" needs both sides, not spend alone. Used by
     agents/goal_agent.py to project whether a goal's current savings rate
-    is enough to hit its target by its target date."""
+    is enough to hit its target by its target date.
+
+    Skips any transaction with `counts_toward_net_savings: False` — a
+    credit-card statement's itemized purchases aren't a real cash event on
+    their own (see module docstring); only that statement's synthetic
+    payment record, dated at the actual due date, represents money really
+    leaving the bank."""
     totals: dict[str, float] = {}
     for t in transactions:
+        if not t.get("counts_toward_net_savings", True):
+            continue
         period = _period_of(t)
         totals[period] = totals.get(period, 0.0) + t.get("amount", 0)
     return sorted((PeriodTotal(period, total) for period, total in totals.items()), key=lambda p: p.period)

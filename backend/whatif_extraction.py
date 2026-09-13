@@ -14,16 +14,31 @@ financial decision gets narrated against. Every field is nullable/false by
 default for exactly that reason; whatif_agent.py only simulates whatever
 came back non-null, and says plainly when nothing did rather than guessing
 what was meant.
+
+Migrated to Agent Framework/Foundry (2026-09-12) — the one loose end left
+over from the original 7-agent migration (see agents/whatif_agent.py's
+WhatIfAgentResponse docstring, which used to flag this as deliberately
+left on its old direct-OpenAI path). Found a real, concrete reason to
+close it while doing so, not just for consistency: this call's cost was
+NEVER tracked anywhere — agents/whatif_agent.py only ever captured its own
+final-narration call's LLMCallMetrics into scenario_llm_calls, so every
+extraction call (a real, billed request) was invisible in token_usage,
+including — worse — in the "question wasn't specific enough" early-return
+path, where extraction is the ONLY call that turn makes. Routing through
+agent_complete() (same as payslip_agent/spending_agent/whatif_agent's own
+narration call) means this now returns real metrics the caller can
+include, and runs against the already-provisioned Foundry deployment
+instead of a separate direct OpenAI client/key.
 """
 
 import json
 
-from openai import OpenAI
+from pydantic import BaseModel
 
+from agents.agent_framework_llm import agent_complete
+from agents.llm_metrics import LLMCallMetrics
 from budgeting.budgets import DEFAULT_MONTHLY_BUDGETS
 from config import config
-
-_client = OpenAI(api_key=config.OPENAI_API_KEY)
 
 _BUDGET_CATEGORIES = tuple(DEFAULT_MONTHLY_BUDGETS.keys())
 
@@ -47,7 +62,34 @@ A scenario with fewer fields filled in but all of them real is far better than o
 complete but guessed at a number."""
 
 
-def extract_scenario(user_query: str, conversation: list[dict], goal_names: list[str]) -> dict:
+class _ExtractedScenario(BaseModel):
+    """Structured-output shape for the Foundry call — see agent_complete()'s
+    ChatOptions(response_format=...). budget_category/goal_name stay plain
+    `str | None` here rather than a Literal/Enum: the real category set is
+    validated against _BUDGET_CATEGORIES below, and the real goal-name set
+    is caller-supplied and different per user, so neither can be a static
+    type. No "explanation"/"detail" narrative field exists on this model at
+    all (it's a pure data-extraction shape) — agent_complete() is called
+    with check_for_generic_response=False for exactly the same reason
+    orchestrator_v2.IntentClassification is: a correct, complete answer
+    here is often ALL-null fields with zero rupee figures (a genuinely
+    vague question), which the narrative-figure heuristic would otherwise
+    misflag as a suspiciously evasive completion on every such call."""
+
+    regime_switch: bool = False
+    additional_80c: float | None = None
+    additional_80d: float | None = None
+    additional_24b: float | None = None
+    budget_category: str | None = None
+    budget_delta: float | None = None
+    goal_name: str | None = None
+    goal_extra_monthly: float | None = None
+
+
+async def extract_scenario(user_query: str, conversation: list[dict], goal_names: list[str]) -> tuple[dict, LLMCallMetrics]:
+    """Returns (scenario, metrics) — metrics is always a real LLMCallMetrics
+    now (never absent), including on the all-null/"nothing to simulate"
+    result, since that's still one real, billed extraction call."""
     goal_context = f"The user's saved goal names are: {goal_names}." if goal_names else "The user has no saved goals."
     conversation_context = ""
     if conversation:
@@ -58,19 +100,22 @@ def extract_scenario(user_query: str, conversation: list[dict], goal_names: list
 
     user_prompt = "\n\n".join(part for part in (goal_context, conversation_context, f"Question: {user_query}") if part)
 
-    response = _client.chat.completions.create(
+    raw, metrics = await agent_complete(
+        _SYSTEM_PROMPT,
+        user_prompt,
         model=config.WHATIF_EXTRACTION_MODEL,
-        messages=[
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ],
-        response_format={"type": "json_object"},
+        response_model=_ExtractedScenario,
+        agent="whatif_extraction",
+        check_for_generic_response=False,
     )
-    parsed = json.loads(response.choices[0].message.content or "{}")
+    try:
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        parsed = {}
     if not isinstance(parsed, dict):
-        return {}
+        parsed = {}
 
-    return {
+    scenario = {
         "regime_switch": bool(parsed.get("regime_switch") is True),
         "additional_80c": _num_or_none(parsed.get("additional_80c")),
         "additional_80d": _num_or_none(parsed.get("additional_80d")),
@@ -80,6 +125,7 @@ def extract_scenario(user_query: str, conversation: list[dict], goal_names: list
         "goal_name": parsed.get("goal_name") if parsed.get("goal_name") in goal_names else None,
         "goal_extra_monthly": _num_or_none(parsed.get("goal_extra_monthly")),
     }
+    return scenario, metrics
 
 
 def _num_or_none(value) -> float | None:

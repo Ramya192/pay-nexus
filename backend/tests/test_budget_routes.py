@@ -71,3 +71,25 @@ class TestSuggestedBudget:
         body = response.json()
         assert body["salary_bracket"] == "Below 30k"
         assert body["budgets"]["Rent"] == 18000 * 0.4
+
+    # The 3 real brackets between the two already covered above — route-level
+    # coverage for every SALARY_BRACKETS entry, not just the default and the
+    # lowest. Rent figures match tests/test_budgeting.py's own direct-computed
+    # values for the same brackets.
+    def test_30k_60k_bracket(self, client, auth_headers):
+        response = client.get("/budget/suggested", params={"monthly_income": 45000}, headers=auth_headers)
+        body = response.json()
+        assert body["salary_bracket"] == "30k-60k"
+        assert body["budgets"]["Rent"] == 12600
+
+    def test_100k_150k_bracket(self, client, auth_headers):
+        response = client.get("/budget/suggested", params={"monthly_income": 120000}, headers=auth_headers)
+        body = response.json()
+        assert body["salary_bracket"] == "100k-150k"
+        assert body["budgets"]["Rent"] == 27000
+
+    def test_150k_plus_bracket(self, client, auth_headers):
+        response = client.get("/budget/suggested", params={"monthly_income": 200000}, headers=auth_headers)
+        body = response.json()
+        assert body["salary_bracket"] == "150k+"
+        assert body["budgets"]["Rent"] == 39600

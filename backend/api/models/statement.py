@@ -20,6 +20,33 @@ class StatementParseRequest(BaseModel):
     format: Literal["pdf", "csv"]
 
 
+class ManualTransactionRequest(BaseModel):
+    """POST /statement/categorize-manual — a single hand-entered cash
+    transaction, structured passthrough rather than raw text extraction
+    (the user already typed the fields; there's nothing to extract).
+    Plaintext in, plaintext out, nothing persisted — same tier as /parse.
+    `category` left unset runs the transaction through the same rules-then-
+    LLM categorize_transactions() every other ingestion path uses;
+    supplying it marks the row "user_corrected" instead, same convention as
+    StatementList.tsx's per-row category correction.
+
+    `occurrence` must be computed by the CALLER (frontend) against
+    whichever existing entry this transaction will be appended to, before
+    calling this route — see make_transaction_id()'s own docstring
+    (models.py). Left at its default of 0 only makes sense for a brand-new
+    entry's first row; appending a second manual transaction that happens
+    to share date/description/amount/account with an earlier one MUST pass
+    a higher occurrence, or both rows collide onto the same transaction_id
+    once merged into one list."""
+
+    date: str  # "YYYY-MM-DD"
+    description: str
+    amount: float
+    source_account: str
+    category: str | None = None
+    occurrence: int = 0
+
+
 class TransactionOut(BaseModel):
     transaction_id: str
     date: str

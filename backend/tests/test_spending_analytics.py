@@ -5,6 +5,7 @@ dicts, matching how they travel through PayNexusState (agents/state.py).
 
 from analytics.recurring import find_recurring_merchants, subscriptions_table
 from analytics.spending_trends import (
+    net_savings_by_period,
     period_span_months,
     spending_by_category,
     spending_by_category_and_period,
@@ -12,14 +13,35 @@ from analytics.spending_trends import (
 )
 
 
-def _txn(date, description, amount, category=None, statement_period=None):
-    return {
+def _txn(
+    date,
+    description,
+    amount,
+    category=None,
+    statement_period=None,
+    counts_toward_category_spend=None,
+    counts_toward_net_savings=None,
+):
+    txn = {
         "date": date,
         "description": description,
         "amount": amount,
         "category": category,
         "statement_period": statement_period,
     }
+    # Only set when the caller actually passes a value — unlike
+    # statement_period above (read via `.get(...) or fallback`, so an
+    # explicit None is harmless), _expenses()/net_savings_by_period() read
+    # these via `.get(key, True)`, where an explicit None key would BE the
+    # value returned (not the True default) and incorrectly exclude the
+    # transaction. Every pre-existing test call site never passes these
+    # kwargs at all, so the key stays genuinely absent for them, exactly
+    # like a real transaction dict from before this feature existed.
+    if counts_toward_category_spend is not None:
+        txn["counts_toward_category_spend"] = counts_toward_category_spend
+    if counts_toward_net_savings is not None:
+        txn["counts_toward_net_savings"] = counts_toward_net_savings
+    return txn
 
 
 class TestSpendingByCategory:
@@ -96,6 +118,97 @@ class TestStatementPeriodGrouping:
         result = spending_by_period(transactions)
         periods = {p.period: p.total_spent for p in result}
         assert periods == {"16 Jul 2026 to 15 Aug 2026": 2000, "2026-07": 1000}
+
+
+class TestCreditCardBillingCycleSplit:
+    """Itemized credit-card purchases and a statement's synthetic bill-
+    payment record sit on opposite corners of category-spend vs.
+    net-savings: a purchase should count toward "where did the money go"
+    for its real billing-cycle period, but NOT toward "how much cash did I
+    actually save" until the statement is paid — that's the payment
+    record's job, dated at the real due date. See spending_trends.py's
+    module docstring for the full reasoning."""
+
+    def test_itemized_purchases_count_toward_category_and_period_not_net_savings(self):
+        transactions = [
+            _txn(
+                "2026-03-22", "GROCERY STORE", -2000, "Groceries",
+                statement_period="16 Mar 2026 to 14 Apr 2026", counts_toward_net_savings=False,
+            ),
+            _txn(
+                "2026-04-05", "AMAZON.IN", -3000, "Shopping",
+                statement_period="16 Mar 2026 to 14 Apr 2026", counts_toward_net_savings=False,
+            ),
+        ]
+        period = "16 Mar 2026 to 14 Apr 2026"
+        assert spending_by_category_and_period(transactions)[period] == {"Groceries": 2000, "Shopping": 3000}
+        assert spending_by_period(transactions)[0].total_spent == 5000
+        # The whole point: this billing cycle's real purchases must NOT
+        # register as a cash-flow event of their own.
+        net_periods = {p.period: p.total_spent for p in net_savings_by_period(transactions)}
+        assert period not in net_periods
+
+    def test_synthetic_payment_counts_toward_net_savings_not_category_spend(self):
+        payment = _txn(
+            "2026-05-05", "Credit Card Bill Payment", -5000,
+            statement_period="2026-05", counts_toward_category_spend=False,
+        )
+        assert spending_by_category([payment]) == []
+        assert spending_by_period([payment]) == []
+        assert spending_by_category_and_period([payment]) == {}
+        net_periods = {p.period: p.total_spent for p in net_savings_by_period([payment])}
+        assert net_periods == {"2026-05": -5000}
+
+    def test_full_scenario_payment_month_nets_correctly_without_double_counting(self):
+        """The concrete reported case: a Mar15-Apr14 statement due May 5th
+        must reduce MAY's net savings, not March's/April's — while March/
+        April's category breakdown still reflects the real purchases, and
+        May's category breakdown does NOT also show the payment as a new
+        "purchase" category."""
+        billing_period = "16 Mar 2026 to 14 Apr 2026"
+        transactions = [
+            _txn(
+                "2026-03-22", "GROCERY STORE", -2000, "Groceries",
+                statement_period=billing_period, counts_toward_net_savings=False,
+            ),
+            _txn(
+                "2026-04-05", "AMAZON.IN", -3000, "Shopping",
+                statement_period=billing_period, counts_toward_net_savings=False,
+            ),
+            _txn(
+                "2026-05-05", "Credit Card Bill Payment", -5000,
+                statement_period="2026-05", counts_toward_category_spend=False,
+            ),
+            _txn("2026-05-01", "SALARY CREDIT", 80000, "Income", statement_period="2026-05"),
+        ]
+        # Category breakdown: the billing cycle keeps its real purchases...
+        by_period = spending_by_category_and_period(transactions)
+        assert by_period[billing_period] == {"Groceries": 2000, "Shopping": 3000}
+        # ...and May shows no "Uncategorized"/payment-driven category bucket.
+        assert "2026-05" not in by_period
+
+        # Net savings: May nets salary against ONLY the payment, not the
+        # itemized total again (that would double the same rupees).
+        net_periods = {p.period: p.total_spent for p in net_savings_by_period(transactions)}
+        assert net_periods["2026-05"] == 80000 - 5000
+        assert billing_period not in net_periods
+
+    def test_defaults_preserve_existing_behavior_when_flags_absent(self):
+        """Every pre-existing transaction shape (no flags at all) must
+        behave identically to before this feature existed — proves the
+        `.get(key, True)` fallback is a true no-op, not just a happy-path
+        default."""
+        transactions = [
+            _txn("2026-07-01", "SALARY CREDIT", 75000, "Income"),
+            _txn("2026-07-02", "SWIGGY", -500, "Food & Dining"),
+            _txn("2026-07-03", "SWIGGY", -300, "Food & Dining"),
+            _txn("2026-07-04", "RENT PAYMENT", -18000, "Rent"),
+        ]
+        result = spending_by_category(transactions)
+        assert [c.category for c in result] == ["Rent", "Food & Dining"]
+        assert result[1].total_spent == 800
+        net_periods = {p.period: p.total_spent for p in net_savings_by_period(transactions)}
+        assert net_periods["2026-07"] == 75000 - 500 - 300 - 18000
 
 
 class TestPeriodSpanMonths:

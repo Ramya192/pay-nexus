@@ -56,11 +56,12 @@ from whatif_extraction import extract_scenario, has_any_signal
 
 
 class WhatIfAgentResponse(BaseModel):
-    """See agents/agent_framework_llm.py's module docstring. Covers only
-    this node's own final narration call; whatif_extraction.py's separate
-    one-shot extract_scenario() call is a helper module, not one of the
-    orchestrator's 7 agent nodes — left on its existing direct-OpenAI path
-    for now, a future cleanup candidate."""
+    """See agents/agent_framework_llm.py's module docstring. Covers this
+    node's own final narration call — whatif_extraction.py's separate
+    one-shot extract_scenario() call now also goes through agent_complete()
+    (migrated 2026-09-12, see that module's own docstring), just with its
+    own response model (_ExtractedScenario), since it's a different call
+    with a different shape, not this one."""
 
     explanation: str
     tables: list[str] = []
@@ -98,9 +99,13 @@ def whatif_agent_node(state: PayNexusState) -> dict:
     goal_names = [g["name"] for g in goals if isinstance(g.get("name"), str)]
     conversation = state.get("conversation") or []
 
-    scenario = extract_scenario(state["user_query"], conversation, goal_names)
+    scenario, extraction_metrics = asyncio.run(extract_scenario(state["user_query"], conversation, goal_names))
 
     if not has_any_signal(scenario):
+        # extraction_metrics is included even here — this IS the only real
+        # (billed) call this turn makes; leaving it out (the old behavior)
+        # made a genuine extraction cost invisible in token_usage. See
+        # whatif_extraction.py's module docstring for the full story.
         return {
             "scenario_response": json.dumps(
                 {
@@ -109,7 +114,8 @@ def whatif_agent_node(state: PayNexusState) -> dict:
                     "cut my Food & Dining budget by ₹1,000.\"",
                     "follow_up_suggestions": [],
                 }
-            )
+            ),
+            "scenario_llm_calls": [extraction_metrics],
         }
 
     payslip_history = state.get("payslip_history") or []
@@ -153,7 +159,7 @@ def whatif_agent_node(state: PayNexusState) -> dict:
     return {
         "scenario_response": raw,
         "scenario_tables": resolve_selected_tables(raw, available_tables),
-        "scenario_llm_calls": [metrics],
+        "scenario_llm_calls": [extraction_metrics, metrics],
     }
 
 

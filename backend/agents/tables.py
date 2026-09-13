@@ -15,7 +15,14 @@ import json
 
 def resolve_selected_tables(raw_answer: str, available_tables: dict[str, dict]) -> list[dict]:
     """A bad/missing "tables" key just means no tables render — never a
-    crash — and an unknown key is silently dropped rather than trusted."""
+    crash — and an unknown key is silently dropped rather than trusted.
+
+    Deduplicates the key list before resolving (first occurrence wins,
+    order otherwise preserved) — nothing stops the LLM's "tables" field
+    from repeating a key (e.g. ["gaps", "gaps"]), and without this the same
+    precomputed table would render twice in a row in the chat UI, looking
+    like a rendering bug rather than the harmless model repetition it
+    actually is."""
     try:
         parsed = json.loads(raw_answer)
         keys = parsed.get("tables") if isinstance(parsed, dict) else None
@@ -23,4 +30,5 @@ def resolve_selected_tables(raw_answer: str, available_tables: dict[str, dict]) 
         keys = None
     if not isinstance(keys, list):
         return []
-    return [available_tables[k] for k in keys if isinstance(k, str) and k in available_tables]
+    unique_keys = dict.fromkeys(k for k in keys if isinstance(k, str) and k in available_tables)
+    return [available_tables[k] for k in unique_keys]

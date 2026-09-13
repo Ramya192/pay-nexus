@@ -8,6 +8,8 @@ import { ActivePayslipBanner } from "../PayslipUploader/ActivePayslipBanner";
 import { PayslipHistoryList } from "../PayslipUploader/PayslipHistoryList";
 import { PayslipHistoryUpload } from "../PayslipUploader/PayslipHistoryUpload";
 import { PayslipUploader } from "../PayslipUploader/PayslipUploader";
+import { CreditCardStatementUploader } from "../StatementUploader/CreditCardStatementUploader";
+import { ManualExpenseEntry } from "../StatementUploader/ManualExpenseEntry";
 import { StatementList } from "../StatementUploader/StatementList";
 import { StatementUploader } from "../StatementUploader/StatementUploader";
 
@@ -35,8 +37,11 @@ const TABS: { id: TabId; label: string; icon: typeof Upload }[] = [
  * sidebar sections — this is a navigation change, not a rebuild of what's
  * inside them.
  */
+type UploadKind = "bank" | "creditCard";
+
 export function TabbedPanel() {
   const [active, setActive] = useState<TabId>("spending");
+  const [uploadKind, setUploadKind] = useState<UploadKind>("bank");
 
   return (
     <div className="mx-auto max-w-2xl">
@@ -67,7 +72,43 @@ export function TabbedPanel() {
             Optional — upload bank/credit-card statements so the SpendingAnalyser can answer
             questions about where your money actually goes, not just your payslip.
           </p>
-          <StatementUploader />
+          <div className="mb-3 flex gap-1 rounded-md bg-slate-100 p-1 text-sm">
+            <button
+              type="button"
+              onClick={() => setUploadKind("bank")}
+              className={`flex-1 rounded px-2 py-1 font-medium transition-colors ${
+                uploadKind === "bank" ? "bg-white text-brand-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              Bank statement
+            </button>
+            <button
+              type="button"
+              onClick={() => setUploadKind("creditCard")}
+              className={`flex-1 rounded px-2 py-1 font-medium transition-colors ${
+                uploadKind === "creditCard" ? "bg-white text-brand-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              Credit card statement
+            </button>
+          </div>
+          {/* Both kept mounted (not conditionally rendered) so in-progress
+              form state in either one survives switching back and forth —
+              same reasoning as TabPanel below. */}
+          <TabPanel visible={uploadKind === "bank"}>
+            <StatementUploader />
+          </TabPanel>
+          <TabPanel visible={uploadKind === "creditCard"}>
+            <CreditCardStatementUploader />
+          </TabPanel>
+          <details className="mt-3 border-t border-slate-100 pt-3">
+            <summary className="cursor-pointer text-sm font-medium text-slate-700">
+              Add a cash expense
+            </summary>
+            <div className="mt-3">
+              <ManualExpenseEntry />
+            </div>
+          </details>
           <div className="mt-3 border-t border-slate-100 pt-3">
             <StatementList />
           </div>

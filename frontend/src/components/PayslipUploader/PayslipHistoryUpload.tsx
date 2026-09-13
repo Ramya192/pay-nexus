@@ -6,6 +6,7 @@ import { usePayslipHistoryStore } from "../../store/payslipHistoryStore";
 import { extractPdfText } from "../../utils/pdfText";
 
 interface FileStatus {
+  id: string; // NOT just the filename — see the comment on setFiles() below for why
   name: string;
   status: "pending" | "working" | "done" | "duplicate" | "error";
   detail?: string; // the extracted month on success/duplicate, an error message on failure
@@ -33,7 +34,14 @@ export function PayslipHistoryUpload() {
     e.target.value = "";
     if (selected.length === 0 || !aesKey) return;
 
-    setFiles(selected.map((f) => ({ name: f.name, status: "pending" })));
+    // Found via real testing (not assumed): `f.name` alone isn't a safe
+    // React key — a real, plausible batch (e.g. the same payslip PDF
+    // re-selected by mistake, or a phone's generically-named "IMG_scan.pdf"
+    // used across several months) can genuinely contain two files sharing
+    // one filename. That collided two <li key={f.name}> entries and threw
+    // a real "two children with the same key" warning; each file's index in
+    // THIS batch is stable and unique regardless of name collisions.
+    setFiles(selected.map((f, idx) => ({ id: `${idx}-${f.name}`, name: f.name, status: "pending" })));
 
     for (let i = 0; i < selected.length; i++) {
       setFiles((prev) => prev.map((f, idx) => (idx === i ? { ...f, status: "working" } : f)));
@@ -83,7 +91,7 @@ export function PayslipHistoryUpload() {
       {files.length > 0 && (
         <ul className="space-y-1 text-xs">
           {files.map((f) => (
-            <li key={f.name} className="flex items-center justify-between gap-2 text-slate-600">
+            <li key={f.id} className="flex items-center justify-between gap-2 text-slate-600">
               <span className="truncate">{f.name}</span>
               <span
                 className={

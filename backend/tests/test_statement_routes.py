@@ -70,6 +70,54 @@ class TestStatementParseCsv:
         assert client.get("/statement/list", headers=auth_headers).json() == []
 
 
+class TestCategorizeManual:
+    """POST /statement/categorize-manual — the structured-passthrough route
+    behind manual cash-transaction entry and the credit-card feature's
+    synthetic bill-payment record. No LLM call needed for these tests —
+    "SWIGGY" is rule-matched (same rules.py used by the CSV path above)."""
+
+    _BODY = {
+        "date": "2026-07-15",
+        "description": "SWIGGY ORDER",
+        "amount": -500,
+        "source_account": "Cash",
+    }
+
+    def test_requires_auth(self, client):
+        assert client.post("/statement/categorize-manual", json=self._BODY).status_code == 401
+
+    def test_no_category_runs_rule_categorization(self, client, auth_headers):
+        response = client.post("/statement/categorize-manual", json=self._BODY, headers=auth_headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["category"] == "Food & Dining"
+        assert data["category_source"] == "rule"
+        assert data["amount"] == -500
+        assert data["source_account"] == "Cash"
+
+    def test_explicit_category_marked_user_corrected(self, client, auth_headers):
+        body = {**self._BODY, "category": "Shopping"}
+        response = client.post("/statement/categorize-manual", json=body, headers=auth_headers)
+        data = response.json()
+        assert data["category"] == "Shopping"
+        assert data["category_source"] == "user_corrected"
+
+    def test_occurrence_disambiguates_transaction_id(self, client, auth_headers):
+        first = client.post("/statement/categorize-manual", json=self._BODY, headers=auth_headers).json()
+        second = client.post(
+            "/statement/categorize-manual", json={**self._BODY, "occurrence": 1}, headers=auth_headers
+        ).json()
+        assert first["transaction_id"] != second["transaction_id"]
+
+    def test_invalid_date_400(self, client, auth_headers):
+        body = {**self._BODY, "date": "not-a-date"}
+        assert client.post("/statement/categorize-manual", json=body, headers=auth_headers).status_code == 400
+
+    def test_nothing_persisted(self, client, auth_headers):
+        client.post("/statement/categorize-manual", json=self._BODY, headers=auth_headers)
+        assert client.get("/statement/list", headers=auth_headers).json() == []
+
+
 @pytest.mark.integration
 class TestStatementParsePdf:
     def test_pdf_text_structured_by_llm(self, client, auth_headers):
