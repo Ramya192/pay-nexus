@@ -13,3 +13,6 @@ build/
 *.faiss
 *.index
 .DS_Store
+
+PROJECT_CONTEXT.md
+CHANGELOG.md
