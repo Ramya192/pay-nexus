@@ -7,17 +7,48 @@ of seven specialized reasoning agents behind an orchestrator, covering payslips,
 spending, budgeting, and savings goals in one place.
 
 **V1** (payslip + tax regulation only, 3 agents) is live: [nice-desert-0837ea310.7.azurestaticapps.net](https://nice-desert-0837ea310.7.azurestaticapps.net)
-· `paynexus-api.azurewebsites.net` (backend API).
-**V2** (`v2-dev`) adds bank statements, budgeting, savings goals, and scenario planning — built,
-tested, and live-verified end to end. Deployed to its own, separate Azure resources (own App
-Service, own Static Web App, own database) rather than merged to `main`, so it never touches V1's
-production traffic: [ambitious-pebble-083cdaf10.7.azurestaticapps.net](https://ambitious-pebble-083cdaf10.7.azurestaticapps.net)
+· `paynexus-api.azurewebsites.net` (backend API, currently stopped to consolidate hosting cost).
+**V2** added bank statements, budgeting, savings goals, and scenario planning — built, tested, and
+live-verified end to end. Deployed to its own, separate Azure resources (own App Service, own
+Static Web App, own database) rather than merged to `main`, so it never touches V1's production
+traffic: [ambitious-pebble-083cdaf10.7.azurestaticapps.net](https://ambitious-pebble-083cdaf10.7.azurestaticapps.net)
 · `paynexus-api-v2.azurewebsites.net` (backend API).
-**V2.1** (this worktree, `foundry-v3`) is an agent-layer-only migration of V2's orchestrator from
+**V2.1** (this worktree, `foundry-v2`) is an agent-layer-only migration of V2's orchestrator from
 LangGraph to Microsoft's **Agent Framework**, running against **Azure AI Foundry** (the
 `paynexus-foundry` project) instead of calling OpenAI directly — the FastAPI app, auth, and
-encrypted CRUD are untouched. Not deployed anywhere yet (agent-layer scope only); see
-[Agent Framework migration](#agent-framework-migration-v21) below.
+encrypted CRUD are untouched. **`foundry-v2` is the sole active branch and what the V2 Azure
+resources above actually run.** See [Agent Framework migration](#agent-framework-migration-v21)
+below for the full story.
+
+## The story so far: V1 → V2 → V2.1
+
+**V1** shipped first, and stayed small on purpose: 3 agents (Payslip, Regulatory, Nudge), LangGraph
+orchestrator, OpenAI called directly. It's still live, on `main`, untouched by everything below.
+
+**V2** started as a genuine question: could this same architecture carry a much bigger scope —
+bank statements, budgeting, savings goals, scenario planning — without redesigning the
+orchestration layer? It could. Built as its own branch (`v2-dev`) and its own Azure resources
+(never merged to `main`, so V1's production traffic was never at risk while V2 was still
+"still-evolving"), V2 grew to 7 agents on the exact same LangGraph `StateGraph` + direct-OpenAI
+design V1 used, plus a client-side proactive-alerts layer V1 never had. It shipped, was
+live-verified end to end, and ran in production for weeks.
+
+**V2.1** started as a deliberate, portfolio-motivated question of its own, with no deadline
+pressure: could V2's *same 7 agents* run on Microsoft's Agent Framework against Azure AI Foundry
+instead — a stronger interview story than "yet another LangGraph app," and closer to what
+enterprise Azure shops actually reach for? Scoped tightly to the agent layer only (FastAPI, auth,
+and encrypted CRUD untouched) so the answer could be proven without re-risking everything V2 had
+already gotten right. It could — genuinely wired into the live `/chat` endpoint, not a spike — and
+then kept growing past pure parity: a live orchestration deadlock found and fixed against the real
+running server, a self-updating RAG web-search fallback, capacity-aware context compression, and
+every V2 feature request that came in afterward (manual cash entry, credit-card billing-cycle
+tracking) landed here instead of on `v2-dev`.
+
+Once V2.1 had genuinely caught up feature-for-feature and then kept going, `v2-dev` became pure
+overhead — two branches to keep in sync for one product. It was deleted from GitHub on
+2026-09-13, and this branch (then still named `foundry-v3`, a name that made sense when a
+`v2-dev` existed to disambiguate from) was renamed to `foundry-v2` the same day: PayNexus V2's
+one and only branch now, full stop.
 
 ## Architecture
 
@@ -62,7 +93,7 @@ alert via `localStorage`.
 | Resource | What | Where |
 |---|---|---|
 | `paynexus-api` | V1 backend, Docker container | Azure App Service (Basic B1, `indiasouthcentral`) |
-| `paynexus-api-v2` | V2 backend, Docker container — **same App Service Plan as V1** (shared B1 compute, no extra plan cost) | Azure App Service (Basic B1, `indiasouthcentral`) |
+| `paynexus-api-v2` | V2 backend, Docker container — **same App Service Plan as V1** (shared compute, no extra plan cost) | Azure App Service (Free F1, `indiasouthcentral`) |
 | `paynexus-web` | V1 frontend | Azure Static Web Apps (Free tier) |
 | `paynexus-web-v2` | V2 frontend | Azure Static Web Apps (Free tier) |
 | `paynexus-db-ramya` | PostgreSQL 16 + `pgvector`, separate `paynexus` (V1) / `paynexus_v2` (V2) databases on the same server | Azure Database for PostgreSQL Flexible Server (Burstable B1MS) |
@@ -70,7 +101,9 @@ alert via `localStorage`.
 
 CI/CD: two independent workflows, so V1's and V2's *builds* never cross-trigger each other —
 `.github/workflows/deploy.yml` (pushes to `main` → `paynexus-api`/`paynexus-web`) and
-`.github/workflows/deploy-v2.yml` (pushes to `v2-dev` → `paynexus-api-v2`/`paynexus-web-v2`). Each
+`.github/workflows/deploy-v2.yml` (pushes to `foundry-v2` → `paynexus-api-v2`/`paynexus-web-v2`,
+retargeted from the now-retired `v2-dev` on 2026-09-13, then renamed from `foundry-v3` the same
+day). Each
 backend job builds+pushes its own image tag to Docker Hub; each App Service has its own Continuous
 Deployment webhook, both registered on the same `ramya192/paynexus-backend` Docker Hub repo since
 Docker Hub's classic webhooks aren't tag-scoped — a push to either branch pings *both* webhooks, but
