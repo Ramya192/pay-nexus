@@ -204,6 +204,12 @@ export function CreditCardStatementUploader() {
     } catch {
       setStatus("payment-failed");
       setPendingPayment({ sourceAccount: sourceAccount.trim(), itemizedTotal: total });
+      // Clear the review panel now too, same as the success path already
+      // does -- otherwise it stayed rendered alongside the new retry panel
+      // below, with its own still-clickable "Save statement" button that
+      // would re-attempt saving the itemized entry a second time (already
+      // persisted at this point, so at best a confusing 409).
+      setParsed(null);
       setError(
         "Purchases saved, but the payment record failed to save — your net-savings figures won't reflect this " +
           "bill yet until you retry."
@@ -247,7 +253,7 @@ export function CreditCardStatementUploader() {
 
       {!pendingPayment && (
         <div className="space-y-2 rounded-md border border-dashed border-slate-300 p-3">
-          <label className="block text-xs font-medium text-slate-600">
+          <label className="block text-xs font-medium text-slate-600" htmlFor="cc-statement-upload">
             Upload credit card statement{" "}
             <span className="font-normal text-slate-400">
               (PDF or CSV — text is extracted in your browser; only that text, never the file,
@@ -255,6 +261,7 @@ export function CreditCardStatementUploader() {
             </span>
           </label>
           <input
+            id="cc-statement-upload"
             type="file"
             accept="application/pdf,.csv,text/csv"
             onChange={handleFile}
@@ -288,7 +295,7 @@ export function CreditCardStatementUploader() {
                     {t.category ?? "Uncategorized"}
                   </span>
                   <span className={t.amount < 0 ? "text-slate-700" : "text-emerald-600"}>
-                    {t.amount < 0 ? "-" : "+"}₹{Math.abs(t.amount).toLocaleString("en-IN")}
+                    {t.amount < 0 ? "-" : "+"}₹{Math.abs(t.amount).toLocaleString("en-IN", { maximumFractionDigits: 0 })}
                   </span>
                 </span>
               </li>
@@ -341,7 +348,7 @@ export function CreditCardStatementUploader() {
         <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3">
           <p className="text-xs text-amber-700">
             Purchases are saved. The bill-payment record (due {dueDate}, ₹
-            {Math.abs(pendingPayment.itemizedTotal).toLocaleString("en-IN")}) hasn't saved yet —
+            {Math.abs(pendingPayment.itemizedTotal).toLocaleString("en-IN", { maximumFractionDigits: 0 })}) hasn't saved yet —
             your net-savings figures won't include this bill until it does.
           </p>
           <button
@@ -352,10 +359,15 @@ export function CreditCardStatementUploader() {
           >
             {status === "saving" ? "Retrying…" : "Retry payment record"}
           </button>
+          {/* A retry failure sets `error` while pendingPayment is still set
+              -- this is the only place that error can actually be seen; the
+              old bottom-of-page fallback below required `!pendingPayment`,
+              which a retry failure never satisfies, so it silently never
+              rendered here even though `error` was genuinely set. */}
+          {error && <p className="text-xs text-red-600">{error}</p>}
         </div>
       )}
 
-      {error && !parsed && !pendingPayment && <p className="text-xs text-red-600">{error}</p>}
       {status === "saved" && <p className="text-xs text-emerald-600">Statement and payment record both saved.</p>}
     </div>
   );

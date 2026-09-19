@@ -151,7 +151,8 @@ function GoalCard({ entry, valuationError }: { entry: GoalEntry; valuationError?
           />
         </div>
         <p className="text-xs text-slate-500">
-          ₹{savedAmount.toLocaleString("en-IN")} of ₹{targetAmount.toLocaleString("en-IN")} ({pct}%)
+          ₹{savedAmount.toLocaleString("en-IN", { maximumFractionDigits: 0 })} of ₹
+          {targetAmount.toLocaleString("en-IN", { maximumFractionDigits: 0 })} ({pct}%)
           {isInstrumentLinked && liveValue !== undefined && (
             <span className="ml-1 text-brand-600">
               · live {instrumentType === "fd" ? "FD value" : "NAV value"}

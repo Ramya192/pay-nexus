@@ -180,6 +180,7 @@ export function AuthScreen() {
         <div>
           <h1 className="text-xl font-semibold text-slate-900">PayNexus</h1>
           <p className="text-sm text-slate-500">Your pay, explained. Your finances, guided.</p>
+          <p className="mt-1 text-xs text-slate-400">by Ramya A</p>
         </div>
         <div className="space-y-1">
           <label className="text-sm font-medium text-slate-700" htmlFor="email">

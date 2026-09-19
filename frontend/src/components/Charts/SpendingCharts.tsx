@@ -80,6 +80,10 @@ export function SpendingCharts() {
   );
 }
 
+function formatRupees(value: unknown): string {
+  return `₹${Number(value ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+}
+
 const PIE_COLORS = [
   "var(--color-brand-500)",
   "var(--color-brand-300)",
@@ -123,7 +127,7 @@ function CategoryPieChart({ data }: { data: AnalyticsResult["category_breakdown"
               <Cell key={entry.category} fill={PIE_COLORS[i % PIE_COLORS.length]} />
             ))}
           </Pie>
-          <Tooltip formatter={(value: unknown) => `₹${Number(value ?? 0).toLocaleString("en-IN")}`} />
+          <Tooltip formatter={formatRupees} />
           <Legend
             layout="horizontal"
             verticalAlign="bottom"
@@ -177,7 +181,7 @@ function SavingsTrendChart({ data }: { data: AnalyticsResult["savings_projection
           <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
           <XAxis dataKey="period" tick={{ fontSize: 11 }} />
           <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => `₹${(v / 1000).toFixed(0)}k`} />
-          <Tooltip formatter={(value: unknown) => `₹${Number(value ?? 0).toLocaleString("en-IN")}`} />
+          <Tooltip formatter={formatRupees} />
           <Legend wrapperStyle={{ fontSize: 12 }} />
           <Line
             type="monotone"

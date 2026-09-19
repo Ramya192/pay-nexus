@@ -151,7 +151,7 @@ export function StatementUploader() {
       </div>
 
       <div className="space-y-2 rounded-md border border-dashed border-slate-300 p-3">
-        <label className="block text-xs font-medium text-slate-600">
+        <label className="block text-xs font-medium text-slate-600" htmlFor="bank-statement-upload">
           Upload bank statement{" "}
           <span className="font-normal text-slate-400">
             (PDF or CSV — text is extracted in your browser; only that text, never the file,
@@ -159,6 +159,7 @@ export function StatementUploader() {
           </span>
         </label>
         <input
+          id="bank-statement-upload"
           type="file"
           accept="application/pdf,.csv,text/csv"
           onChange={handleFile}
@@ -191,7 +192,7 @@ export function StatementUploader() {
                     {t.category ?? "Uncategorized"}
                   </span>
                   <span className={t.amount < 0 ? "text-slate-700" : "text-emerald-600"}>
-                    {t.amount < 0 ? "-" : "+"}₹{Math.abs(t.amount).toLocaleString("en-IN")}
+                    {t.amount < 0 ? "-" : "+"}₹{Math.abs(t.amount).toLocaleString("en-IN", { maximumFractionDigits: 0 })}
                   </span>
                 </span>
               </li>

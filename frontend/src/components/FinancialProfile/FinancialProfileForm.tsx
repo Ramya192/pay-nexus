@@ -100,9 +100,14 @@ export function FinancialProfileForm() {
     setStatus("saving");
     setError(null);
     try {
-      setStoreProfile(profile);
       const blob = await encryptJSON(aesKey, profile);
       await saveFinancialProfile(blob);
+      // Only update the store once the save actually succeeds -- doing this
+      // before the save (as this used to) left the store holding a profile
+      // that was never persisted if encryption/the API call then failed, a
+      // silent inconsistency other data (e.g. utils/alerts.ts's deduction-
+      // headroom calc) would read as real until the next reload.
+      setStoreProfile(profile);
       setStatus("saved");
     } catch (err) {
       setStatus("error");
@@ -119,11 +124,15 @@ export function FinancialProfileForm() {
           </h3>
           {section.fields.map((field) => (
             <div key={field.key} className="space-y-1">
-              <label className="flex items-baseline justify-between text-xs font-medium text-slate-600">
+              <label
+                className="flex items-baseline justify-between text-xs font-medium text-slate-600"
+                htmlFor={`financial-profile-${field.key}`}
+              >
                 <span>{field.label}</span>
                 <span className="font-normal text-slate-400">{field.hint}</span>
               </label>
               <input
+                id={`financial-profile-${field.key}`}
                 type="number"
                 min="0"
                 value={values[field.key] ?? ""}

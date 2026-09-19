@@ -78,10 +78,11 @@ export function PayslipHistoryUpload() {
 
   return (
     <div className="space-y-2">
-      <label className="block text-xs font-medium text-slate-600">
+      <label className="block text-xs font-medium text-slate-600" htmlFor="payslip-history-upload">
         Upload past payslips (PDF, select multiple)
       </label>
       <input
+        id="payslip-history-upload"
         type="file"
         accept="application/pdf"
         multiple

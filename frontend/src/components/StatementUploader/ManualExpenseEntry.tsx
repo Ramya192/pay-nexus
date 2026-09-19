@@ -119,8 +119,11 @@ export function ManualExpenseEntry() {
     <form onSubmit={handleSubmit} className="space-y-3">
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1">
-          <label className="text-xs font-medium text-slate-600">Date</label>
+          <label className="text-xs font-medium text-slate-600" htmlFor="expense-date">
+            Date
+          </label>
           <input
+            id="expense-date"
             type="date"
             value={date}
             onChange={(e: ChangeEvent<HTMLInputElement>) => handleFieldChange(setDate)(e.target.value)}
@@ -128,8 +131,11 @@ export function ManualExpenseEntry() {
           />
         </div>
         <div className="space-y-1">
-          <label className="text-xs font-medium text-slate-600">Amount (₹)</label>
+          <label className="text-xs font-medium text-slate-600" htmlFor="expense-amount">
+            Amount (₹)
+          </label>
           <input
+            id="expense-amount"
             type="number"
             min="0"
             step="0.01"
@@ -139,8 +145,11 @@ export function ManualExpenseEntry() {
           />
         </div>
         <div className="col-span-2 space-y-1">
-          <label className="text-xs font-medium text-slate-600">Description</label>
+          <label className="text-xs font-medium text-slate-600" htmlFor="expense-description">
+            Description
+          </label>
           <input
+            id="expense-description"
             type="text"
             value={description}
             onChange={(e: ChangeEvent<HTMLInputElement>) => handleFieldChange(setDescription)(e.target.value)}
@@ -149,8 +158,11 @@ export function ManualExpenseEntry() {
           />
         </div>
         <div className="space-y-1">
-          <label className="text-xs font-medium text-slate-600">Category</label>
+          <label className="text-xs font-medium text-slate-600" htmlFor="expense-category">
+            Category
+          </label>
           <select
+            id="expense-category"
             value={category}
             onChange={(e: ChangeEvent<HTMLSelectElement>) => handleFieldChange(setCategory)(e.target.value)}
             className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
@@ -164,8 +176,11 @@ export function ManualExpenseEntry() {
           </select>
         </div>
         <div className="space-y-1">
-          <label className="text-xs font-medium text-slate-600">Account</label>
+          <label className="text-xs font-medium text-slate-600" htmlFor="expense-account">
+            Account
+          </label>
           <input
+            id="expense-account"
             type="text"
             value={sourceAccount}
             onChange={(e: ChangeEvent<HTMLInputElement>) => handleFieldChange(setSourceAccount)(e.target.value)}

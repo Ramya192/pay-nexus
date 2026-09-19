@@ -54,7 +54,7 @@ export function PDFParser({
 
   return (
     <div className="space-y-2 rounded-md border border-dashed border-slate-300 p-3">
-      <label className="block text-xs font-medium text-slate-600">
+      <label className="block text-xs font-medium text-slate-600" htmlFor="payslip-pdf-upload">
         Upload payslip PDF{" "}
         <span className="font-normal text-slate-400">
           (optional — text is extracted in your browser; only that text, never the file, reaches
@@ -62,6 +62,7 @@ export function PDFParser({
         </span>
       </label>
       <input
+        id="payslip-pdf-upload"
         type="file"
         accept="application/pdf"
         onChange={handleFile}

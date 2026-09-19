@@ -75,7 +75,9 @@ export default function App() {
             <Landmark className="h-4.5 w-4.5" aria-hidden="true" />
           </span>
           <div>
-            <h1 className="text-lg font-semibold tracking-tight text-slate-900">PayNexus</h1>
+            <h1 className="text-lg font-semibold tracking-tight text-slate-900">
+              PayNexus <span className="font-normal text-slate-400">by Ramya A</span>
+            </h1>
             <p className="text-xs text-slate-500">{email}</p>
           </div>
         </div>

@@ -1,5 +1,5 @@
 import { Check } from "lucide-react";
-import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { fetchSuggestedBudget, saveBudget } from "../../api/budget";
 import { encryptJSON } from "../../crypto/clientEncryption";
 import { useAuthStore } from "../../store/authStore";
@@ -40,8 +40,20 @@ export function BudgetForm() {
   const [values, setValues] = useState<Record<string, string>>({});
   const [status, setStatus] = useState<"idle" | "loading" | "saving" | "saved" | "error">("loading");
   const [error, setError] = useState<string | null>(null);
+  // Set right before handleSubmit's own setStoreBudget call, so the
+  // hydration effect below (keyed on storedBudget) can tell "the store
+  // changed because I just saved" apart from "the store changed because
+  // login hydration landed" -- without this, saving re-triggers this same
+  // effect (storedBudget's identity just changed) and its own
+  // setStatus("idle") immediately overwrote the "saved" confirmation in the
+  // same tick it appeared, so the checkmark never actually stayed visible.
+  const justSaved = useRef(false);
 
   useEffect(() => {
+    if (justSaved.current) {
+      justSaved.current = false;
+      return;
+    }
     if (storedBudget) {
       const next: Record<string, string> = {};
       for (const category of BUDGET_CATEGORIES) {
@@ -96,6 +108,7 @@ export function BudgetForm() {
     try {
       const blob = await encryptJSON(aesKey, budget);
       await saveBudget(blob);
+      justSaved.current = true;
       setStoreBudget(budget);
       setStatus("saved");
     } catch {

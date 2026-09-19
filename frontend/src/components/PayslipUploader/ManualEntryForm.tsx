@@ -110,8 +110,11 @@ export function ManualEntryForm({
       <div className="grid grid-cols-2 gap-3">
         {FIELDS.map((field) => (
           <div key={field.key} className="space-y-1">
-            <label className="text-xs font-medium text-slate-600">{field.label}</label>
+            <label className="text-xs font-medium text-slate-600" htmlFor={`payslip-${field.key}`}>
+              {field.label}
+            </label>
             <input
+              id={`payslip-${field.key}`}
               type={field.type}
               value={values[field.key] ?? ""}
               onChange={(e: ChangeEvent<HTMLInputElement>) => handleChange(field.key, e.target.value)}

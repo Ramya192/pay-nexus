@@ -157,7 +157,7 @@ function TransactionDetail({ entry }: { entry: StatementEntry }) {
                 ))}
               </select>
               <span className={`w-20 shrink-0 text-right ${t.amount < 0 ? "text-slate-700" : "text-emerald-600"}`}>
-                {t.amount < 0 ? "-" : "+"}₹{Math.abs(t.amount).toLocaleString("en-IN")}
+                {t.amount < 0 ? "-" : "+"}₹{Math.abs(t.amount).toLocaleString("en-IN", { maximumFractionDigits: 0 })}
               </span>
             </span>
           </li>

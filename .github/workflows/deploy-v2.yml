@@ -160,6 +160,8 @@ jobs:
 
       - run: npm ci
 
+      - run: npm test
+
       # .env.production supplies VITE_API_BASE_URL (paynexus-api-v2's own
       # URL, not V1's) -- Vite inlines it at build time, same pattern as
       # V1's workflow. Real `npm run build`, not the SWA action's own
