@@ -44,10 +44,53 @@ jobs:
       # tests from running, rather than relying on "is a key present" as a
       # proxy for that, which the OPENAI_API_KEY placeholder would
       # otherwise defeat.
-      - run: pytest -m "not integration"
+      - run: pytest -m "not integration" --cov=. --cov-report=term-missing
         env:
           OPENAI_API_KEY: "sk-ci-placeholder-not-a-real-key"
           DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci_placeholder"
+
+      # Not a coverage gate (a hard cutoff on % would need its own deliberate
+      # decision about what floor is reasonable) — just makes the number
+      # visible on every run's summary page instead of buried in the raw log.
+      - name: Coverage summary
+        if: always()
+        run: |
+          echo "### Coverage" >> $GITHUB_STEP_SUMMARY
+          python -m coverage report --format=markdown >> $GITHUB_STEP_SUMMARY || true
+
+      # Also not a hard gate — a new CVE landing shouldn't silently block
+      # every deploy with no human decision. Surfaces known vulnerabilities
+      # in pinned dependencies on every run instead of only when someone
+      # remembers to run pip-audit locally (see README's Security section
+      # for the one known, no-fix-available finding this already caught).
+      - name: Dependency vulnerability scan
+        if: always()
+        run: |
+          echo "### Dependency vulnerabilities (pip-audit)" >> $GITHUB_STEP_SUMMARY
+          python -m pip_audit -r requirements.txt --format markdown >> $GITHUB_STEP_SUMMARY || true
+
+      # Static analysis of our own code (pip-audit above only covers
+      # third-party dependency CVEs, not bugs in code we wrote). Also
+      # non-blocking, same reasoning as pip-audit -- a new finding on
+      # existing code shouldn't silently block a deploy with no human
+      # decision. -ll skips low-severity noise on the summary; the full
+      # report (all severities) is still in the uploaded JSON artifact
+      # below for anyone who wants it.
+      - name: Static security scan (bandit)
+        if: always()
+        run: |
+          pip install bandit
+          echo "### Static security scan (bandit)" >> $GITHUB_STEP_SUMMARY
+          bandit -r . -x ./tests,./.venv -ll -f txt >> $GITHUB_STEP_SUMMARY || true
+          bandit -r . -x ./tests,./.venv -f json -o bandit-report.json || true
+
+      - name: Upload bandit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-report
+          path: backend/bandit-report.json
+          retention-days: 30
 
   deploy-backend:
     needs: test-backend
@@ -69,6 +112,30 @@ jobs:
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/paynexus-backend:v2-latest
             ${{ secrets.DOCKERHUB_USERNAME }}/paynexus-backend:v2-${{ github.sha }}
+
+      # Scans the image actually being deployed (OS packages + Python deps
+      # baked into the layer), not just requirements.txt on disk -- catches
+      # base-image CVEs pip-audit structurally can't see. Non-blocking, same
+      # reasoning as pip-audit/bandit above: exit-code 0 means "report, don't
+      # gate" -- a new base-image CVE landing shouldn't silently block every
+      # deploy with no human decision.
+      - name: Container vulnerability scan (Trivy)
+        if: always()
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ secrets.DOCKERHUB_USERNAME }}/paynexus-backend:v2-${{ github.sha }}
+          format: table
+          severity: HIGH,CRITICAL
+          exit-code: "0"
+          output: trivy-report.txt
+
+      - name: Container scan summary
+        if: always()
+        run: |
+          echo "### Container vulnerability scan (Trivy, HIGH/CRITICAL)" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat trivy-report.txt >> $GITHUB_STEP_SUMMARY 2>/dev/null || echo "no report generated" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
 
       # No explicit "restart the App Service" step -- Continuous Deployment
       # is enabled directly on paynexus-api-v2 (a webhook Docker Hub calls

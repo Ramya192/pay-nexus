@@ -44,3 +44,35 @@ export async function fetchGoals(): Promise<GoalRow[]> {
   const { data } = await apiClient.get<GoalRow[]>("/goals");
   return data;
 }
+
+export interface GoalValuationEntry {
+  goal_id: string;
+  instrument_type: "fd" | "mutual_fund";
+  fd_principal?: number;
+  fd_annual_rate?: number;
+  fd_start_date?: string;
+  mf_scheme_code?: string;
+  mf_units_held?: number;
+}
+
+export interface GoalValuationResult {
+  goal_id: string;
+  current_value: number | null;
+  error: string | null;
+}
+
+/**
+ * Live current-value lookup for FD/mutual-fund-linked goals
+ * (backend/analytics/investment_valuation.py) — stateless, nothing
+ * persisted, same contract as parseStatementText. Called once per Goals
+ * tab load (GoalList.tsx), not on every render — an FD's value barely
+ * moves minute to minute and a mutual fund's NAV updates once a day, so
+ * there's no real value in polling more often than "the tab was opened."
+ */
+export async function fetchGoalValuations(
+  entries: GoalValuationEntry[]
+): Promise<GoalValuationResult[]> {
+  if (entries.length === 0) return [];
+  const { data } = await apiClient.post<GoalValuationResult[]>("/goals/valuation", entries);
+  return data;
+}

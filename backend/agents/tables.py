@@ -2,7 +2,7 @@
 Shared by agents/payslip_agent.py and agents/nudge_agent.py: both build a
 dict of {key: table} for whichever computed tables (tax_calculations.py's
 gaps_table/financial_profile_table, payslip_trends.py's trends_table/
-duplicates_table, payslip_agent's own _components_table) are available this
+duplicates_table, payslip_math.py's net_pay_table) are available this
 turn, ask the LLM to pick relevant keys via a "tables" field in its JSON
 response, then call resolve_selected_tables() here to map those keys back
 to the real precomputed dicts. The LLM only ever sees/produces table KEYS

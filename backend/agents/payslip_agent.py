@@ -51,6 +51,7 @@ from agents.conversation import format_conversation_for_prompt
 from agents.state import PayNexusState
 from agents.tables import resolve_selected_tables
 from config import config
+from payslip_math import net_pay_table
 from payslip_trends import format_trends_for_prompt, resolve_effective_payslip, trends_table
 from tax_calculations import compute_all_gaps, gaps_table
 from tax_slabs import (
@@ -73,36 +74,6 @@ class PayslipAgentResponse(BaseModel):
     tables: list[str] = []
     follow_up_suggestions: list[str] = []
 
-# Matches ManualEntryForm.tsx's field labels — used to build a table
-# straight from the payslip dict itself, same "compute exactly in Python,
-# hand it over pre-solved" reasoning as tax_calculations.py's tables: this
-# doesn't need the LLM's own (previously collected, silently discarded by
-# the frontend) "component_breakdown" guess when the source values are
-# already sitting right here, structured, with nothing to compute.
-_COMPONENT_LABELS = {
-    "basic": "Basic",
-    "hra": "HRA received",
-    "specialAllowance": "Special Allowance",
-    "pfEmployee": "PF — employee",
-    "pfEmployer": "PF — employer",
-    "professionalTax": "Professional Tax",
-    "tds": "TDS",
-    "bonus": "Bonus this month",
-    "rentPaid": "Monthly rent paid",
-}
-
-
-def _components_table(payslip_data: dict) -> dict | None:
-    rows = [
-        [label, f"₹{payslip_data[key]:,.0f}"]
-        for key, label in _COMPONENT_LABELS.items()
-        if isinstance(payslip_data.get(key), (int, float)) and not isinstance(payslip_data.get(key), bool)
-    ]
-    if not rows:
-        return None
-    month = payslip_data.get("month", "")
-    return {"title": f"Payslip components{f' — {month}' if month else ''}", "headers": ["Component", "Amount"], "rows": rows}
-
 _SYSTEM_PROMPT = """You are the Payslip Reasoning Agent inside PayNexus, an Indian payslip \
 literacy assistant. You are given one user's actual decrypted payslip components and a \
 question about them. Reason step by step over:
@@ -111,6 +82,15 @@ question about them. Reason step by step over:
   city / 40% elsewhere), (HRA actually received)
 - Old vs. new tax regime comparison for this specific salary structure
 - Bonus tax impact, Form 16 Part A/B reconciliation, month-on-month pay change
+
+The "components" table (when available) includes two rows computed exactly in Python, not by \
+you — "Gross pay" (Basic + HRA + Special Allowance + Bonus) and "Net pay" (Gross pay minus PF- \
+employee, Professional Tax, and TDS). Whenever a question asks for take-home/net pay directly, or \
+asks why it changed, quote that computed Net Pay figure — never re-derive or estimate net pay \
+yourself from the individual components; that is exactly the kind of money arithmetic this app \
+does in Python so a model's arithmetic mistake can't reach the user. "Why did my take-home drop \
+this month?" with 2+ months of history means comparing THAT computed Net Pay figure across the \
+relevant payslips, not just individual component trends.
 
 If a "Declared old-regime deductions" figure is given below, it's already computed exactly \
 (80C + 80D + 24(b), capped correctly) — use that number directly for regime comparison rather \
@@ -204,7 +184,7 @@ def payslip_agent_node(state: PayNexusState) -> dict:
         }
 
     available_tables: dict[str, dict] = {}
-    if (c := _components_table(payslip_data)) is not None:
+    if (c := net_pay_table(payslip_data))["rows"]:
         available_tables["components"] = c
 
     prompt_parts = []

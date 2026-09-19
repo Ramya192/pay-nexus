@@ -7,25 +7,24 @@ same trust tier as transactions (see agents/state.py's `goals` field):
 Computed here in Python and handed to agents/goal_agent.py as
 already-correct figures — same "compute exactly, hand it over pre-solved"
 pattern as tax_calculations.py, payslip_trends.py, and
-analytics/spending_trends.py. The one thing this module does NOT compute:
-whether a savings rate is actually achievable, or price/return projections
-for market-linked goals (stocks, FDs) — there's no live price-lookup source
-wired in yet (see this module's module-level TODO note below); progress
-here is target-vs-saved math only, with an optional "at your current
-savings rate" projection when transaction data is also available.
+analytics/spending_trends.py.
+
+**2026-09-13 update**: this module's progress math (`compute_goal_progress`
+below) is still target-vs-saved-amount only — it never fetches a live price
+itself. That's deliberate, not the gap it used to be: `saved_amount` for an
+FD/mutual-fund-linked goal is now the CLIENT's already-fetched live current
+value by the time it reaches here (see analytics/investment_valuation.py
+and POST /goals/valuation) — the frontend resolves "what is this goal
+currently worth" once, before this module ever runs, rather than this
+module reaching out for a price mid-calculation. So progress math here is
+already correct for a market-linked goal in practice, without this module
+itself needing to know an FD from a plain savings goal.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-
-# TODO: for market-linked goals (stocks, FDs, mutual funds), progress here
-# is savings-contribution math only -- it doesn't account for investment
-# returns/appreciation between now and target_date. No live price-lookup
-# source is wired into this codebase yet; wire one in (and feed a
-# return-rate assumption into compute_goal_progress) before claiming this
-# module projects anything beyond "money physically saved so far."
 
 
 @dataclass

@@ -6,7 +6,9 @@ dicts, matching how they travel through PayNexusState (agents/state.py).
 from analytics.recurring import find_recurring_merchants, subscriptions_table
 from analytics.spending_trends import (
     net_savings_by_period,
+    net_savings_projection_chart_data,
     period_span_months,
+    project_net_savings,
     spending_by_category,
     spending_by_category_and_period,
     spending_by_period,
@@ -333,3 +335,51 @@ class TestSubscriptionsTable:
         table = subscriptions_table(transactions)
         assert table["title"] == "Recurring subscriptions"
         assert [row[0] for row in table["rows"]] == ["NETFLIX"]
+
+
+class TestProjectNetSavings:
+    def _income_and_expense(self, month, income, expense):
+        return [
+            _txn(f"{month}-01", "SALARY", income, "Income"),
+            _txn(f"{month}-15", "RENT PAYMENT", -expense, "Rent"),
+        ]
+
+    def test_none_with_fewer_than_three_periods(self):
+        transactions = self._income_and_expense("2026-06", 50000, 30000) + self._income_and_expense(
+            "2026-07", 50000, 30000
+        )
+        assert project_net_savings(transactions) is None
+
+    def test_projects_a_real_trend_with_enough_periods(self):
+        # Net savings of 20000, 15000, 10000 -- a clean, declining trend.
+        transactions = (
+            self._income_and_expense("2026-05", 50000, 30000)
+            + self._income_and_expense("2026-06", 50000, 35000)
+            + self._income_and_expense("2026-07", 50000, 40000)
+        )
+        projection = project_net_savings(transactions, periods_ahead=1)
+        assert projection is not None
+        assert projection.slope_per_period < 0  # genuinely declining, not just non-positive
+        assert projection.projected_values[0] < 10000  # continuing the decline past the last real value
+        assert projection.historical_values == [20000, 15000, 10000]
+
+    def test_chart_data_is_none_when_projection_is_none(self):
+        transactions = self._income_and_expense("2026-06", 50000, 30000)
+        assert net_savings_projection_chart_data(transactions) is None
+
+    def test_chart_data_shape_matches_what_the_frontend_chart_expects(self):
+        transactions = (
+            self._income_and_expense("2026-05", 50000, 30000)
+            + self._income_and_expense("2026-06", 50000, 30000)
+            + self._income_and_expense("2026-07", 50000, 30000)
+        )
+        chart_data = net_savings_projection_chart_data(transactions)
+        assert chart_data is not None
+        assert set(chart_data.keys()) == {
+            "historical_periods",
+            "historical_values",
+            "projected_periods",
+            "projected_values",
+            "r_squared",
+        }
+        assert len(chart_data["historical_periods"]) == len(chart_data["historical_values"]) == 3

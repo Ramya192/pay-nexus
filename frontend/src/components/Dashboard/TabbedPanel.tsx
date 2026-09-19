@@ -1,6 +1,7 @@
 import { Gauge, History, PiggyBank, Target, Upload, Wallet } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { BudgetForm } from "../BudgetPlanner/BudgetForm";
+import { SpendingCharts } from "../Charts/SpendingCharts";
 import { FinancialProfileForm } from "../FinancialProfile/FinancialProfileForm";
 import { GoalForm } from "../GoalTracker/GoalForm";
 import { GoalList } from "../GoalTracker/GoalList";
@@ -111,6 +112,9 @@ export function TabbedPanel() {
           </details>
           <div className="mt-3 border-t border-slate-100 pt-3">
             <StatementList />
+          </div>
+          <div className="mt-3 border-t border-slate-100 pt-3">
+            <SpendingCharts />
           </div>
         </TabPanel>
 

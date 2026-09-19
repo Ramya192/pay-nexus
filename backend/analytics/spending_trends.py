@@ -60,6 +60,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date as _date
 
+from analytics.trend_projection import project_linear_trend
+
 _AVG_DAYS_PER_MONTH = 30.44  # average Gregorian month length
 
 
@@ -253,6 +255,39 @@ def category_period_trends(transactions: list[dict]) -> list[CategoryPeriodTrend
     return sorted(trends, key=lambda t: abs(t.delta), reverse=True)
 
 
+@dataclass
+class SpendProjection:
+    historical_periods: list[str]
+    historical_values: list[float]
+    slope_per_period: float
+    r_squared: float
+    projected_periods: list[str]
+    projected_values: list[float]
+
+
+def project_net_savings(transactions: list[dict], periods_ahead: int = 3) -> SpendProjection | None:
+    """A real linear-regression fit over net-savings-by-period, projected
+    forward — genuinely different from goal_progress.py's "required
+    ₹X/month to hit a target" math (that's a target-driven calculation with
+    no history involved at all; this is a history-driven fit with no target
+    involved). None with fewer than trend_projection.MIN_POINTS_FOR_PROJECTION
+    periods on file — same "don't project from too little data" principle
+    as every other trend function in this module.
+    """
+    periods = net_savings_by_period(transactions)
+    projection = project_linear_trend([p.total_spent for p in periods], periods_ahead)
+    if projection is None:
+        return None
+    return SpendProjection(
+        historical_periods=[p.period for p in periods],
+        historical_values=[p.total_spent for p in periods],
+        slope_per_period=projection.slope_per_period,
+        r_squared=projection.r_squared,
+        projected_periods=[f"+{i}" for i in range(1, periods_ahead + 1)],
+        projected_values=projection.projected_values,
+    )
+
+
 def format_spending_summary_for_prompt(transactions: list[dict]) -> str:
     by_category = spending_by_category(transactions)
     if not by_category:
@@ -286,6 +321,20 @@ def format_spending_summary_for_prompt(transactions: list[dict]) -> str:
                 f"  {t.category}: ₹{t.first_value:,.0f} ({t.first_period}) {arrow} ₹{t.last_value:,.0f} "
                 f"({t.last_period})"
             )
+
+    projection = project_net_savings(transactions)
+    if projection is not None:
+        direction = "growing" if projection.slope_per_period > 0 else "shrinking" if projection.slope_per_period < 0 else "flat"
+        lines.append(
+            f"Net-savings linear trend projection (already computed via linear regression over "
+            f"{len(projection.historical_values)} periods, R²={projection.r_squared:.2f} — quote "
+            f"directly, do not recompute or re-derive): net savings per period is {direction} by "
+            f"roughly ₹{abs(projection.slope_per_period):,.0f}/period. At this rate, the next period "
+            f"is projected at ₹{projection.projected_values[0]:,.0f}. Note this is a projection from "
+            f"the historical trend line, not a guarantee — a low R² means the real data doesn't sit "
+            f"close to a straight line, so say the projection is less reliable rather than stating it "
+            f"with false confidence."
+        )
     return "\n".join(lines)
 
 
@@ -314,6 +363,24 @@ def period_trend_table(transactions: list[dict]) -> dict | None:
         "title": "Spending trend by period",
         "headers": ["Period", "Total spent"],
         "rows": [[p.period, f"₹{p.total_spent:,.0f}"] for p in trend],
+    }
+
+
+def net_savings_projection_chart_data(transactions: list[dict]) -> dict | None:
+    """Not a <DataTable> table like the others below — a plain dict shaped
+    for a chart component instead (frontend/src/components/Charts), same
+    "compute once in Python, render on both the chat table and any chart
+    from the identical numbers" principle. None when there's not enough
+    history to project (see project_net_savings)."""
+    projection = project_net_savings(transactions)
+    if projection is None:
+        return None
+    return {
+        "historical_periods": projection.historical_periods,
+        "historical_values": projection.historical_values,
+        "projected_periods": projection.projected_periods,
+        "projected_values": projection.projected_values,
+        "r_squared": projection.r_squared,
     }
 
 

@@ -410,3 +410,55 @@ class TestStatementIsolation:
 
         assert client.post("/statement/save", json=body, headers=user_a).status_code == 201
         assert client.post("/statement/save", json=body, headers=user_b).status_code == 201
+
+
+class TestAnalytics:
+    """POST /statement/analytics — powers the Bank statements tab's charts.
+    Independent of chat/agents entirely, so no LLM/network involved."""
+
+    def test_empty_transactions_returns_empty_breakdown_and_no_projection(self, client, auth_headers):
+        response = client.post("/statement/analytics", json={"transactions": []}, headers=auth_headers)
+        assert response.status_code == 200
+        body = response.json()
+        assert body["category_breakdown"] == []
+        assert body["savings_projection"] is None
+
+    def test_category_breakdown_computed_correctly(self, client, auth_headers):
+        transactions = [
+            {"date": "2026-07-05", "description": "SWIGGY", "amount": -500, "category": "Food & Dining"},
+            {"date": "2026-07-10", "description": "SWIGGY", "amount": -300, "category": "Food & Dining"},
+            {"date": "2026-07-15", "description": "UBER", "amount": -200, "category": "Transport"},
+        ]
+        response = client.post(
+            "/statement/analytics", json={"transactions": transactions}, headers=auth_headers
+        )
+        body = response.json()
+        assert body["category_breakdown"][0] == {"category": "Food & Dining", "total_spent": 800.0}
+        assert body["category_breakdown"][1] == {"category": "Transport", "total_spent": 200.0}
+
+    def test_savings_projection_present_with_enough_periods(self, client, auth_headers):
+        transactions = []
+        for month, expense in [("2026-05", 30000), ("2026-06", 32000), ("2026-07", 34000)]:
+            transactions.append(
+                {"date": f"{month}-01", "description": "SALARY", "amount": 50000, "category": "Income"}
+            )
+            transactions.append(
+                {
+                    "date": f"{month}-15",
+                    "description": "RENT PAYMENT",
+                    "amount": -expense,
+                    "category": "Rent",
+                }
+            )
+        response = client.post(
+            "/statement/analytics", json={"transactions": transactions}, headers=auth_headers
+        )
+        body = response.json()
+        projection = body["savings_projection"]
+        assert projection is not None
+        assert 0.0 <= projection["r_squared"] <= 1.0
+        assert len(projection["historical_values"]) == 3
+
+    def test_requires_auth(self, client):
+        response = client.post("/statement/analytics", json={"transactions": []})
+        assert response.status_code == 401

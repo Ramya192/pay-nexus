@@ -17,7 +17,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from api.models.goals import GoalFull, GoalOut, GoalSaveRequest
+from analytics.investment_valuation import fd_current_value, mf_current_value
+from api.models.goals import (
+    GoalFull,
+    GoalOut,
+    GoalSaveRequest,
+    GoalValuationRequest,
+    GoalValuationResult,
+)
 from db.database import get_db
 from db.models import Goal, User
 from security.auth import get_current_user
@@ -74,6 +81,47 @@ def delete_goal(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Goal not found.")
     db.delete(goal)
     db.commit()
+
+
+@router.post("/valuation", response_model=list[GoalValuationResult])
+def value_goals(
+    body: list[GoalValuationRequest],
+    _user: User = Depends(get_current_user),
+) -> list[GoalValuationResult]:
+    """Live current-value lookup for FD/mutual-fund-linked goals
+    (analytics/investment_valuation.py) — stateless, plaintext in/out,
+    nothing persisted, same contract as /statement/parse. An FD's value is
+    pure math (no network call); a mutual fund's is a real live NAV lookup
+    that can genuinely fail — each entry gets its own (value, error) pair,
+    so one bad scheme code doesn't fail every other goal in the same
+    request."""
+    results = []
+    for entry in body:
+        if entry.instrument_type == "fd":
+            if entry.fd_principal is None or entry.fd_annual_rate is None or entry.fd_start_date is None:
+                results.append(
+                    GoalValuationResult(goal_id=entry.goal_id, current_value=None, error="Missing FD details.")
+                )
+                continue
+            value = fd_current_value(entry.fd_principal, entry.fd_annual_rate, entry.fd_start_date)
+            results.append(GoalValuationResult(goal_id=entry.goal_id, current_value=value, error=None))
+        elif entry.instrument_type == "mutual_fund":
+            if not entry.mf_scheme_code or entry.mf_units_held is None:
+                results.append(
+                    GoalValuationResult(
+                        goal_id=entry.goal_id, current_value=None, error="Missing mutual fund details."
+                    )
+                )
+                continue
+            value, error = mf_current_value(entry.mf_scheme_code, entry.mf_units_held)
+            results.append(GoalValuationResult(goal_id=entry.goal_id, current_value=value, error=error))
+        else:
+            results.append(
+                GoalValuationResult(
+                    goal_id=entry.goal_id, current_value=None, error=f"Unknown instrument type {entry.instrument_type!r}."
+                )
+            )
+    return results
 
 
 @router.get("", response_model=list[GoalFull])

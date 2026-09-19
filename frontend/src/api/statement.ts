@@ -1,5 +1,35 @@
 import { apiClient } from "./client";
 import type { EncryptedBlob } from "../crypto/clientEncryption";
+import { useTransactionStore } from "../store/transactionStore";
+
+interface HistoricalLabel {
+  description: string;
+  category: string;
+}
+
+/**
+ * The client's own already-decrypted transaction history, as
+ * (description, category) pairs — powers the backend's confidence-gated
+ * logistic regression categorization tier (categorization/ml_classifier.py)
+ * without the server ever persisting this data itself. Read directly from
+ * the store (not passed in by callers) so every parse/categorize call
+ * benefits automatically, without touching StatementUploader.tsx,
+ * CreditCardStatementUploader.tsx, or ManualExpenseEntry.tsx. Only rows
+ * with a real, non-"Uncategorized" category are useful training signal.
+ * See backend/api/models/statement.py's HistoricalLabel for the contract
+ * this maps onto, and categorization/ml_classifier.py for why this exists.
+ */
+function buildHistoricalLabels(): HistoricalLabel[] {
+  return useTransactionStore
+    .getState()
+    .transactions.filter(
+      (t): t is Record<string, unknown> & { description: string; category: string } =>
+        typeof t.description === "string" &&
+        typeof t.category === "string" &&
+        t.category !== "Uncategorized"
+    )
+    .map((t) => ({ description: t.description, category: t.category }));
+}
 
 export interface ParsedTransaction {
   transaction_id: string;
@@ -42,6 +72,7 @@ export async function parseStatementText(
     text,
     source_account: sourceAccount,
     format,
+    historical_labels: buildHistoricalLabels(),
   });
   return data;
 }
@@ -71,6 +102,7 @@ export async function categorizeManualTransaction(
     source_account: sourceAccount,
     category: category || null,
     occurrence,
+    historical_labels: buildHistoricalLabels(),
   });
   return data;
 }
@@ -152,5 +184,40 @@ export interface StatementRow {
  * before use. The plaintext, once decrypted, is a ParsedTransaction[]. */
 export async function fetchStatements(): Promise<StatementRow[]> {
   const { data } = await apiClient.get<StatementRow[]>("/statement/list");
+  return data;
+}
+
+export interface CategoryBreakdownEntry {
+  category: string;
+  total_spent: number;
+}
+
+export interface SavingsProjection {
+  historical_periods: string[];
+  historical_values: number[];
+  projected_periods: string[];
+  projected_values: number[];
+  r_squared: number;
+}
+
+export interface AnalyticsResult {
+  category_breakdown: CategoryBreakdownEntry[];
+  savings_projection: SavingsProjection | null;
+}
+
+/**
+ * Powers SpendingCharts.tsx (Bank statements tab) — category-breakdown pie
+ * chart and a net-savings-trend line chart with a real linear-regression
+ * projection (backend/analytics/trend_projection.py). Independent of
+ * chat/agents entirely: this is a UI feature for browsing already-decrypted
+ * data, not something that needs an LLM. Same plaintext-in/plaintext-out/
+ * nothing-persisted contract as parseStatementText.
+ */
+export async function fetchSpendingAnalytics(
+  transactions: Record<string, unknown>[]
+): Promise<AnalyticsResult> {
+  const { data } = await apiClient.post<AnalyticsResult>("/statement/analytics", {
+    transactions,
+  });
   return data;
 }

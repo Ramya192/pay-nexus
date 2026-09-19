@@ -1,0 +1,24 @@
+[run]
+branch = True
+omit =
+    tests/*
+    .venv/*
+    alembic/*
+    # One-off tooling/eval scripts run manually, not part of the live request path --
+    # excluded so the coverage % reflects the actual application, not scripts that
+    # were never meant to run under pytest in the first place.
+    rag/eval.py
+    rag/eval_dataset.py
+    rag/build_index.py
+    rag/loader.py
+    compression/eval.py
+    agent_eval/eval.py
+    agent_eval/eval_dataset.py
+
+[report]
+precision = 1
+skip_covered = False
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:
+    raise NotImplementedError

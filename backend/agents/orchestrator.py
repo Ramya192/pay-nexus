@@ -50,7 +50,15 @@ budget" is budget), "whatif" (an explicit HYPOTHETICAL — "what if", "what woul
 budget category's spend, or contributing more to a goal; the deciding signal is the hypothetical \
 framing itself, not the topic, since the same topics (regime, budget, goal) are also asked about \
 for REAL current state via payslip/nudge/budget/goal — "am I over budget" is budget, "what if I \
-cut my budget by ₹1,000" is whatif), "unsupported" (see the strict test below — reserved for an \
+cut my budget by ₹1,000" is whatif), "digest" (an explicit request for an OVERALL recap spanning \
+MULTIPLE areas at once — "give me my monthly summary", "how did I do this month", "how am I doing \
+overall", "recap my finances", "give me an overview" — always select digest ALONE, never combined \
+with payslip/spending/budget/goal/nudge, even though it covers the same ground those agents do \
+individually: digest already synthesizes all of it into one narrative, so adding another agent \
+alongside it would just repeat the same figures twice in one response. A question about ONE \
+specific area (just spending, just one goal, just this payslip) is that area's own agent, not \
+digest — digest is reserved for a genuinely cross-cutting "how am I doing" request, not a synonym \
+for "spending" or "goal"), "unsupported" (see the strict test below — reserved for an \
 actual instruction to change stored data, not any question that happens to mention data that's \
 stored).
 
@@ -101,6 +109,9 @@ mentions stored data. Worked examples:
   against a REAL saved target; this is a hypothetical change to that target/spend)
 - "what if I saved ₹5,000 more a month for my Goa trip?" → whatif, not goal (goal reports real \
   progress; this asks what a hypothetical extra contribution would do)
+- "how did I do this month?" → digest alone, not spending+budget+goal separately
+- "give me a summary of my finances" → digest alone
+- "how's my spending looking?" → spending, NOT digest — a single-area question, not a cross-cutting recap
 
 If recent conversation is given below, use it to resolve what a short follow-up is actually \
 about — "consider the payslip history," "what about that," "yes, factor that in" etc. carry no \
@@ -109,7 +120,7 @@ conversation was about, not read as a fresh, unrelated request. E.g. if the prio
 a regime recommendation and the new message says "can you consider the payslip history," that's \
 still a regime question (payslip, possibly plus nudge) — not a brand-new nudge-only request.
 
-Respond with JSON: {"agents": ["payslip"|"regulatory"|"nudge"|"spending"|"goal"|"budget"|"whatif"|"unsupported", ...]}."""
+Respond with JSON: {"agents": ["payslip"|"regulatory"|"nudge"|"spending"|"goal"|"budget"|"whatif"|"digest"|"unsupported", ...]}."""
 
 
 def capability_gap_node(state: PayNexusState) -> dict:
@@ -239,6 +250,9 @@ def assembler_node(state: PayNexusState) -> dict:
     if state.get("scenario_response"):
         sections.append(("Foresight Agent", _format_agent_response(state["scenario_response"])))
         active.append("whatif_agent")
+    if state.get("digest_response"):
+        sections.append(("Monthly Digest", _format_agent_response(state["digest_response"])))
+        active.append("digest_agent")
     if state.get("unsupported_response"):
         # Not one of the three reasoning agents, so no "[Name] reasoned
         # about your data" framing — plain "PayNexus" label, since nothing
@@ -279,6 +293,7 @@ def assembler_node(state: PayNexusState) -> dict:
         + (state.get("goal_tables") or [])
         + (state.get("budget_tables") or [])
         + (state.get("scenario_tables") or [])
+        + (state.get("digest_tables") or [])
     ):
         seen_tables[json.dumps(table, sort_keys=True)] = table
     tables = list(seen_tables.values())

@@ -163,6 +163,13 @@ class TestAssemblerNodeSections:
         assert "[BudgetPlanner Agent]" in result["final_response"]
         assert "You are over on Food & Dining." in result["final_response"]
 
+    def test_digest_response_labeled_and_active(self):
+        state = {"digest_response": '{"explanation": "You saved ₹12,000 this month.", "tables": []}'}
+        result = assembler_node(state)
+        assert result["active_agent"] == "digest_agent"
+        assert "[Monthly Digest]" in result["final_response"]
+        assert "You saved ₹12,000 this month." in result["final_response"]
+
     def test_unsupported_response_labeled_as_paynexus_not_an_agent(self):
         state = {"unsupported_response": "I can't modify your payslip data directly."}
         result = assembler_node(state)

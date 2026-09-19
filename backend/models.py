@@ -64,4 +64,9 @@ def make_transaction_id(
     ID. Left at its default of 0 for any caller that only has one row to
     hash (e.g. a direct unit-test call) — behaves exactly as before then."""
     raw = f"{date_.isoformat()}|{description.strip().lower()}|{amount:.2f}|{source_account}|{occurrence}"
-    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+    # usedforsecurity=False: this is a dedup fingerprint, not a security
+    # boundary -- SHA1 is fine here (collision resistance isn't the property
+    # being relied on, just a stable short ID), but flagging it plainly
+    # rather than leaving a bare hashlib.sha1() call for a scanner (bandit,
+    # added 2026-09-14) to keep re-flagging as if it were unreviewed.
+    return hashlib.sha1(raw.encode("utf-8"), usedforsecurity=False).hexdigest()[:16]

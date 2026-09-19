@@ -28,7 +28,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from analytics.spending_trends import net_savings_projection_chart_data, spending_by_category
 from api.models.statement import (
+    AnalyticsRequest,
+    AnalyticsResponse,
     ManualTransactionRequest,
     StatementFull,
     StatementOut,
@@ -72,7 +75,8 @@ def parse_statement(
     else:
         transactions, truncated_chars = extract_transactions_from_text(body.text, body.source_account)
 
-    transactions = categorize_transactions(transactions)
+    historical_labels = [(h.description, h.category) for h in body.historical_labels]
+    transactions = categorize_transactions(transactions, historical_labels)
     return StatementParseResponse(
         transactions=[
             TransactionOut(
@@ -88,6 +92,26 @@ def parse_statement(
         ],
         skipped_row_count=skipped_row_count,
         truncated_chars=truncated_chars,
+    )
+
+
+@router.post("/analytics", response_model=AnalyticsResponse)
+def statement_analytics(
+    body: AnalyticsRequest,
+    _user: User = Depends(get_current_user),
+) -> AnalyticsResponse:
+    """Powers the Bank statements tab's charts (StatementCharts.tsx) —
+    category-breakdown pie chart and a net-savings-trend line chart with a
+    real linear-regression projection. Independent of the chat/agent
+    system entirely: this is a UI feature for browsing your own already-
+    decrypted data, not a question that needs an LLM to answer. Same
+    plaintext-in/plaintext-out/nothing-persisted contract as /parse."""
+    return AnalyticsResponse(
+        category_breakdown=[
+            {"category": c.category, "total_spent": c.total_spent}
+            for c in spending_by_category(body.transactions)
+        ],
+        savings_projection=net_savings_projection_chart_data(body.transactions),
     )
 
 
@@ -120,7 +144,8 @@ def categorize_manual_transaction(
         txn.category = body.category
         txn.category_source = "user_corrected"
     else:
-        categorize_transactions([txn])
+        historical_labels = [(h.description, h.category) for h in body.historical_labels]
+        categorize_transactions([txn], historical_labels)
 
     return TransactionOut(
         transaction_id=txn.transaction_id,

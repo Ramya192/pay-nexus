@@ -83,6 +83,36 @@ class TestComputeTrends:
         assert compute_trends(snapshots) == []
 
 
+class TestNetPayTrend:
+    """compute_trends()'s new derived "net_pay" entry (payslip_math.py,
+    2026-09-15) — real net-pay math across saved months, not just the raw
+    basic/HRA/TDS fields."""
+
+    def test_net_pay_trend_reflects_all_deduction_fields_not_just_basic(self):
+        snapshots = [
+            {"month": "2026-01", "basic": 50_000, "hra": 20_000, "pfEmployee": 6_000, "tds": 3_000},
+            # A 2% PF bump with no other change: gross unchanged, net pay
+            # should drop by exactly the extra PF, not track basic (flat).
+            {"month": "2026-02", "basic": 50_000, "hra": 20_000, "pfEmployee": 7_000, "tds": 3_000},
+        ]
+        trends = {t.field: t for t in compute_trends(snapshots)}
+        assert trends["basic"].direction == "flat"
+        assert trends["net_pay"].direction == "down"
+        assert trends["net_pay"].delta == -1_000
+
+    def test_net_pay_trend_needs_at_least_two_snapshots_with_basic(self):
+        assert compute_trends([{"month": "2026-01", "basic": 50_000, "hra": 20_000}]) == []
+
+    def test_net_pay_appears_in_prompt_text(self):
+        snapshots = [
+            {"month": "2026-01", "basic": 50_000, "tds": 3_000},
+            {"month": "2026-02", "basic": 50_000, "tds": 5_000},
+        ]
+        text = format_trends_for_prompt(snapshots)
+        assert "Net pay (computed)" in text
+        assert "↓" in text  # TDS up, nothing else changed -> net pay down
+
+
 class TestBonusSummary:
     def test_no_bonus_months_returns_none(self):
         assert _bonus_summary([{"month": "2026-01", "basic": 50_000}]) is None
@@ -159,10 +189,16 @@ class TestFormatting:
         assert "sidebar" not in text.lower()
 
     def test_trends_table_shape(self):
+        # 2 rows, not 1: the "basic" field trend, plus the derived net-pay
+        # trend compute_trends() now always appends when >=2 snapshots have
+        # `basic` filled in (see _compute_net_pay_trend's docstring) — with
+        # only `basic` present here, net pay trends identically to basic
+        # itself (HRA/PF/TDS all default to zero), which is the expected,
+        # documented degenerate case, not a bug.
         snapshots = [{"month": "2026-01", "basic": 50_000}, {"month": "2026-02", "basic": 55_000}]
         table = trends_table(snapshots)
         assert table["headers"] == ["Field", "First", "Last", "Change"]
-        assert len(table["rows"]) == 1
+        assert len(table["rows"]) == 2
 
     def test_trends_table_none_when_nothing_to_show(self):
         assert trends_table([{"month": "2026-01", "basic": 50_000}]) is None

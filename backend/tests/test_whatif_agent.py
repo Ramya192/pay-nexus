@@ -13,7 +13,8 @@ import json
 import pytest
 
 from agents.llm_metrics import LLMCallMetrics
-from agents.whatif_agent import _simulate_tax_scenario, whatif_agent_node
+from agents.whatif_agent import _simulate_payslip_scenario, _simulate_tax_scenario, whatif_agent_node
+from whatif_extraction import has_any_signal
 
 _EXTRACTION_METRICS = LLMCallMetrics(
     agent="whatif_extraction", model="gpt-4.1-mini", input_tokens=200, output_tokens=30, cost_usd=0.0002, latency_ms=400
@@ -25,6 +26,8 @@ _NARRATION_METRICS = LLMCallMetrics(
 _EMPTY_SCENARIO = {
     "regime_switch": False, "additional_80c": None, "additional_80d": None, "additional_24b": None,
     "budget_category": None, "budget_delta": None, "goal_name": None, "goal_extra_monthly": None,
+    "payslip_field": None, "payslip_new_value": None, "payslip_delta_amount": None,
+    "payslip_delta_percent_of_basic": None,
 }
 
 
@@ -170,6 +173,76 @@ class TestExtractionMetricsTracking:
         # Order matters for anyone reading token_usage's calls list — the
         # extraction call genuinely happened first, chronologically.
         assert result["scenario_llm_calls"] == [_EXTRACTION_METRICS, _NARRATION_METRICS]
+
+
+class TestPayslipScenario:
+    """_simulate_payslip_scenario called directly with a hand-built scenario
+    dict — same no-real-credentials pattern as TestTaxScenarioRegimeAvailability
+    above. The motivating real question this whole feature answers: "what
+    would my net pay be if I contributed 2% more to PF?" (2026-09-15)."""
+
+    _payslip = {"month": "2026-07", "basic": 50_000, "hra": 20_000, "pfEmployee": 6_000, "tds": 3_000}
+
+    def _scenario(self, **overrides) -> dict:
+        base = {"payslip_field": None, "payslip_new_value": None, "payslip_delta_amount": None, "payslip_delta_percent_of_basic": None}
+        return {**base, **overrides}
+
+    def test_pf_percent_of_basic_reduces_net_pay_and_old_regime_tax(self):
+        scenario = self._scenario(payslip_field="pfEmployee", payslip_delta_percent_of_basic=2.0)
+        text, table = _simulate_payslip_scenario(scenario, self._payslip, [], {"elssMutualFunds": 0})
+
+        assert table is not None
+        # 2% of 50,000 basic = 1,000 extra PF -> net pay drops by exactly 1,000.
+        assert "1,000" in text
+        net_row = next(r for r in table["rows"] if r[0] == "Net pay (computed)")
+        baseline_net = 50_000 + 20_000 - 6_000 - 3_000  # gross - baseline PF - TDS
+        assert net_row[1] == f"₹{baseline_net:,.0f}"
+        assert net_row[2] == f"₹{baseline_net - 1_000:,.0f}"
+        # PF is old-regime 80C -- more PF means less old-regime tax, not more.
+        assert any(row[0] == "Old-regime tax (computed)" for row in table["rows"])
+
+    def test_basic_salary_change_affects_net_pay_and_annual_income(self):
+        scenario = self._scenario(payslip_field="basic", payslip_new_value=60_000)
+        text, table = _simulate_payslip_scenario(scenario, self._payslip, [], {})
+        net_row = next(r for r in table["rows"] if r[0] == "Net pay (computed)")
+        # baseline: (50,000 + 20,000) - (6,000 PF + 3,000 TDS) = 61,000
+        # scenario: (60,000 + 20,000) - (6,000 PF + 3,000 TDS) = 71,000 -- +10,000 basic flows straight through
+        assert net_row[1] == "₹61,000"
+        assert net_row[2] == "₹71,000"
+        assert "full year" in text  # the stated 12-month assumption is disclosed, not silent
+        assert any(row[0] == "Old-regime tax (computed)" for row in table["rows"])
+
+    def test_no_field_returns_none(self):
+        assert _simulate_payslip_scenario(self._scenario(), self._payslip, [], {}) is None
+
+    def test_no_payslip_on_file(self):
+        scenario = self._scenario(payslip_field="basic", payslip_new_value=60_000)
+        text, table = _simulate_payslip_scenario(scenario, {}, [], {})
+        assert "No payslip is on file" in text
+        assert table is None
+
+    def test_unrecognized_field_is_declined_not_crashed(self):
+        scenario = self._scenario(payslip_field="notARealField", payslip_new_value=1)
+        text, table = _simulate_payslip_scenario(scenario, self._payslip, [], {})
+        assert "isn't a payslip component" in text
+        assert table is None
+
+    def test_professional_tax_change_does_not_touch_annual_income_or_tax_table(self):
+        # Professional tax reduces net pay directly but isn't a GROSS_PAY
+        # field and isn't PF -- shouldn't trigger the old-regime tax branch.
+        scenario = self._scenario(payslip_field="professionalTax", payslip_delta_amount=100)
+        text, table = _simulate_payslip_scenario(scenario, self._payslip, [], {})
+        assert not any(row[0] == "Old-regime tax (computed)" for row in table["rows"])
+
+
+class TestPayslipScenarioSignal:
+    def test_pf_percent_question_is_a_real_signal(self):
+        scenario = {**_EMPTY_SCENARIO, "payslip_field": "pfEmployee", "payslip_delta_percent_of_basic": 2.0}
+        assert has_any_signal(scenario) is True
+
+    def test_field_without_any_amount_is_not_a_signal(self):
+        scenario = {**_EMPTY_SCENARIO, "payslip_field": "basic"}
+        assert has_any_signal(scenario) is False
 
 
 @pytest.mark.integration

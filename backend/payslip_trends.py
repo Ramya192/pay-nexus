@@ -15,6 +15,8 @@ to a precision (trend lines, seasonality) this data doesn't support.
 
 from dataclasses import dataclass
 
+from payslip_math import compute_net_pay
+
 # Gradual fields — first-vs-last is a meaningful trend. Bonus is handled
 # separately below: it's a lump-sum spike field, not a gradual one, and
 # first-vs-last on it is actively misleading (a real mid-period bonus reads
@@ -44,6 +46,33 @@ def _is_number(value) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
+def _compute_net_pay_trend(snapshots: list[dict]) -> FieldTrend | None:
+    """Same first-vs-last method as the raw-field trends below, but for
+    payslip_math.compute_net_pay()'s DERIVED figure rather than a single
+    raw field. Added 2026-09-15 alongside payslip_math.py, closing a real
+    gap: "why did my take-home drop" previously had individual basic/HRA/
+    TDS trends to look at but no actual net-pay number computed across
+    months, only ever the current month's (agents/payslip_agent.py's
+    components table) — leaving the LLM to mentally combine three separate
+    trends into a take-home conclusion itself, the exact "let the model do
+    money math" failure mode this module otherwise avoids.
+
+    Gated on `basic` being present, not on every net-pay-affecting field —
+    same reasoning as compute_net_pay() itself: a missing field defaults to
+    zero rather than excluding the snapshot outright. A snapshot with
+    basic but nothing else is a sparse/test-data edge case in practice, not
+    the common real path, and still produces an honest (if partial)
+    number rather than silently dropping the month from the trend."""
+    points = [(s.get("month", "?"), compute_net_pay(s)) for s in snapshots if _is_number(s.get("basic"))]
+    if len(points) < 2:
+        return None
+    first_month, first_value = points[0]
+    last_month, last_value = points[-1]
+    delta = last_value - first_value
+    direction = "up" if delta > 0 else "down" if delta < 0 else "flat"
+    return FieldTrend("net_pay", "Net pay (computed)", first_month, first_value, last_month, last_value, delta, direction)
+
+
 def compute_trends(snapshots: list[dict]) -> list[FieldTrend]:
     """`snapshots` should already be sorted oldest → newest (GET
     /payslip/snapshots orders by month ascending, so the client doesn't
@@ -60,6 +89,8 @@ def compute_trends(snapshots: list[dict]) -> list[FieldTrend]:
         trends.append(
             FieldTrend(field, label, first_month, first_value, last_month, last_value, delta, direction)
         )
+    if (net_pay_trend := _compute_net_pay_trend(snapshots)) is not None:
+        trends.append(net_pay_trend)
     return trends
 
 

@@ -10,7 +10,7 @@ Not yet wired into a FastAPI app — api/main.py (Phase 4) will
 
 import base64
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from api.models.user import TokenResponse, UserLogin, UserRegister
@@ -18,12 +18,18 @@ from db.database import get_db
 from db.models import User
 from security.auth import create_access_token, hash_password, verify_password
 from security.encryption import generate_salt
+from security.rate_limit import limiter
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+# 5-10 requests/minute per IP — generous for a genuine user (nobody logs in
+# or registers that often), tight enough to make brute-forcing a password or
+# spamming registrations impractical. See security/rate_limit.py for why
+# this exists.
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-def register(body: UserRegister, db: Session = Depends(get_db)) -> TokenResponse:
+@limiter.limit("5/minute")
+def register(request: Request, body: UserRegister, db: Session = Depends(get_db)) -> TokenResponse:
     if db.query(User).filter(User.email == body.email).first() is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "An account with this email already exists.")
 
@@ -43,7 +49,8 @@ def register(body: UserRegister, db: Session = Depends(get_db)) -> TokenResponse
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(body: UserLogin, db: Session = Depends(get_db)) -> TokenResponse:
+@limiter.limit("10/minute")
+def login(request: Request, body: UserLogin, db: Session = Depends(get_db)) -> TokenResponse:
     user = db.query(User).filter(User.email == body.email).first()
     if user is None or not verify_password(body.password, user.hashed_password):
         # Deliberately the same error for "no such user" and "wrong password" —

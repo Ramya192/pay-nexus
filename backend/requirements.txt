@@ -14,6 +14,7 @@
 
 fastapi>=0.115
 uvicorn[standard]>=0.30
+slowapi>=0.1.9  # rate limiting on /auth/login and /auth/register, see security/rate_limit.py
 
 # --- V2.1: Microsoft Agent Framework + Azure AI Foundry ---
 # Narrow extras only, NOT bare `agent-framework[all]` — that pulls in
@@ -39,10 +40,15 @@ langchain-openai>=0.2        # OpenAIEmbeddings
 langchain-text-splitters>=0.3
 pypdf>=4.2                   # PDF loading for rag_documents/
 openai>=2.0,<3.0             # verified on 2.54.0
+scikit-learn>=1.5            # categorization/ml_classifier.py's in-memory, non-persisted logistic regression tier
+numpy>=1.26                  # analytics/trend_projection.py imports this directly, not just via scikit-learn transitively
+httpx>=0.27                  # analytics/investment_valuation.py calls mfapi.in directly -- was already a transitive dep (openai's own SDK), now used directly too
 pgvector>=0.3.6             # vector column type + SQLAlchemy/psycopg integration
 sqlalchemy>=2.0
 alembic>=1.13                # migrations — see backend/alembic/
 psycopg2-binary>=2.9
+azure-monitor-opentelemetry>=1.6   # optional APM -- no-op unless APPLICATIONINSIGHTS_CONNECTION_STRING is set, see api/main.py
+opentelemetry-instrumentation-fastapi>=0.48b0   # FastAPIInstrumentor -- same opt-in gate as above
 python-jose[cryptography]>=3.3   # the [cryptography] extra also covers security/encryption.py's needs — no separate top-level pin needed
 python-dotenv>=1.0
 pydantic[email]>=2.8          # EmailStr validation on auth request schemas — [email] extra already includes pydantic itself
@@ -61,3 +67,5 @@ langchain-ollama>=0.2
 
 # Dev/test only — not needed to run the app itself.
 pytest>=8.0
+pytest-cov>=7.0
+pip-audit>=2.9

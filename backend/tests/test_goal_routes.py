@@ -105,3 +105,65 @@ class TestGoalIsolation:
         assert response.status_code == 404
         # Still there from user A's side — the failed cross-user delete didn't remove it.
         assert len(client.get("/goals", headers=user_a).json()) == 1
+
+
+class TestGoalValuation:
+    """POST /goals/valuation — stateless, no persistence, so no client/db
+    interaction beyond auth. Real network call (mfapi.in) mocked via
+    monkeypatch, matching test_investment_valuation.py's own approach."""
+
+    def test_fd_valuation_is_pure_math_no_network(self, client, auth_headers):
+        body = [
+            {
+                "goal_id": "g1",
+                "instrument_type": "fd",
+                "fd_principal": 100000,
+                "fd_annual_rate": 7.0,
+                "fd_start_date": "2020-01-01",
+            }
+        ]
+        response = client.post("/goals/valuation", json=body, headers=auth_headers)
+        assert response.status_code == 200
+        result = response.json()[0]
+        assert result["goal_id"] == "g1"
+        assert result["current_value"] > 100000
+        assert result["error"] is None
+
+    def test_mutual_fund_valuation_calls_the_price_service(self, client, auth_headers, monkeypatch):
+        import httpx
+
+        class FakeResponse:
+            status_code = 200
+
+            def json(self):
+                return {"data": [{"nav": "100.00"}]}
+
+        monkeypatch.setattr(httpx, "get", lambda url, timeout: FakeResponse())
+        body = [{"goal_id": "g2", "instrument_type": "mutual_fund", "mf_scheme_code": "119598", "mf_units_held": 50}]
+        response = client.post("/goals/valuation", json=body, headers=auth_headers)
+        result = response.json()[0]
+        assert result["current_value"] == 5000.0
+        assert result["error"] is None
+
+    def test_one_bad_entry_does_not_fail_the_others(self, client, auth_headers):
+        body = [
+            {"goal_id": "good", "instrument_type": "fd", "fd_principal": 50000, "fd_annual_rate": 6.0, "fd_start_date": "2021-01-01"},
+            {"goal_id": "bad", "instrument_type": "fd"},  # missing required fields
+        ]
+        response = client.post("/goals/valuation", json=body, headers=auth_headers)
+        results = {r["goal_id"]: r for r in response.json()}
+        assert results["good"]["error"] is None
+        assert results["good"]["current_value"] > 50000
+        assert results["bad"]["error"] is not None
+        assert results["bad"]["current_value"] is None
+
+    def test_unknown_instrument_type_returns_an_error(self, client, auth_headers):
+        body = [{"goal_id": "g3", "instrument_type": "crypto"}]
+        response = client.post("/goals/valuation", json=body, headers=auth_headers)
+        result = response.json()[0]
+        assert result["current_value"] is None
+        assert "crypto" in result["error"]
+
+    def test_requires_auth(self, client):
+        response = client.post("/goals/valuation", json=[])
+        assert response.status_code == 401

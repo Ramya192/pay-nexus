@@ -73,6 +73,7 @@ def pytest_collection_modifyitems(config, items):
 def client():
     from api.main import app
     from db.database import Base, get_db
+    from security.rate_limit import limiter
 
     test_engine = create_engine(
         "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool
@@ -88,6 +89,16 @@ def client():
             db.close()
 
     app.dependency_overrides[get_db] = override_get_db
+    # slowapi's Limiter (security/rate_limit.py) stores its counters against
+    # the shared `app` object, which this fixture reuses across every test in
+    # the session (only the DB is recreated per-test) -- without resetting
+    # here, tests that call /auth/register or /auth/login as setup (most of
+    # them, to get a token) exhaust the real 5-10/minute quota partway
+    # through a full run and every test after that fails with a 429, not
+    # because of anything the test itself did wrong. Reset per-test instead
+    # of disabling the limiter entirely, so a test that specifically wants to
+    # verify rate-limiting behavior still can.
+    limiter.reset()
     try:
         with TestClient(app) as test_client:
             yield test_client

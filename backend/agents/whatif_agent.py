@@ -19,11 +19,16 @@ analytics/goal_progress.py) — never re-derived, never estimated — and only
 narrates the comparison. If extraction found nothing concrete to simulate,
 this says so plainly rather than guessing what was meant.
 
-Three independent domains, any combination of which can be active in one
+Four independent domains, any combination of which can be active in one
 question ("what if I switch regime AND cut my food budget"): tax/regime,
-budget, goal. Each domain's helper below returns (prompt_text, table) or
-None — None either because that domain wasn't asked about, or because it
-was asked about but there's no data to compute against (still handled with
+budget, goal, payslip (added 2026-09-15 — a hypothetical change to a
+payslip component itself, e.g. "what would my net pay be if I contributed
+2% more to PF," distinct from the tax domain's additional_80c/80d/24b,
+which model EXTERNAL investments/insurance rather than a payroll deduction
+that also changes net pay). Each domain's helper below returns
+(prompt_text, table) or None — None either because that domain wasn't
+asked about, or because it was asked about but there's no data to compute
+against (still handled with
 an honest, plain sentence, not a None-shaped silence).
 """
 
@@ -42,6 +47,7 @@ from analytics.goal_progress import (
 )
 from budgeting.budgets import latest_period, simulate_category_adjustment
 from config import config
+from payslip_math import GROSS_PAY_FIELDS, apply_field_change, compute_gross_pay, compute_net_pay, field_label
 from payslip_trends import resolve_effective_payslip
 from tax_calculations import compute_all_gaps
 from tax_slabs import (
@@ -71,7 +77,8 @@ _SYSTEM_PROMPT = """You are the Foresight Agent inside PayNexus, an Indian perso
 assistant — you explore hypothetical "what if" scenarios. You are given one or more computed \
 BASELINE-vs-SCENARIO comparisons for a \
 hypothetical the user asked about (switching tax regime, adding to a deduction section, cutting \
-or raising a budget category, contributing more to a savings goal) and a question about it.
+or raising a budget category, contributing more to a savings goal, changing a payslip component \
+like PF/basic/HRA) and a question about it.
 
 Every figure below is already computed exactly — quote baseline and scenario figures directly, \
 state the delta between them, and never recompute, re-derive, or estimate either number yourself. \
@@ -87,8 +94,11 @@ third-person ("her," "his," "their," "the user's") mid-answer.
 
 Keep "explanation" to a short narrative — don't restate every rupee figure in prose. A line below \
 lists which computed data tables are available this turn by key (e.g. "tax_scenario", \
-"budget_scenario", "goal_scenario") and these render as an actual table in the chat UI; put the \
-"tables" field's array keys to whichever are actually relevant to what was asked.
+"budget_scenario", "goal_scenario", "payslip_scenario") and these render as an actual table in the \
+chat UI; put the "tables" field's array keys to whichever are actually relevant to what was asked. \
+A "payslip_scenario" table's Net Pay row is the answer whenever the question asks what net pay/ \
+take-home WOULD BE under a hypothetical payslip change — quote that computed figure directly, \
+never estimate what a component change "should" do to net pay yourself.
 
 Respond with a JSON object: {"explanation": string, "tables": array of table keys (see above), \
 "follow_up_suggestions": array of strings}."""
@@ -128,6 +138,7 @@ def whatif_agent_node(state: PayNexusState) -> dict:
         (_simulate_tax_scenario(scenario, payslip_data, payslip_history, state.get("financial_profile") or {}), "tax_scenario"),
         (_simulate_budget_scenario(scenario, state.get("transactions") or [], state.get("budgets") or {}), "budget_scenario"),
         (_simulate_goal_scenario(scenario, goals), "goal_scenario"),
+        (_simulate_payslip_scenario(scenario, payslip_data, payslip_history, state.get("financial_profile") or {}), "payslip_scenario"),
     ):
         if domain_result is None:
             continue
@@ -293,5 +304,92 @@ def _simulate_goal_scenario(scenario: dict, goals: list[dict]) -> tuple[str, dic
             ["Extra monthly contribution", f"₹{extra:,.0f}"],
             ["Months to reach goal", f"{months:.1f}" if months is not None else "—"],
         ],
+    }
+    return "\n".join(lines), table
+
+
+def _simulate_payslip_scenario(
+    scenario: dict, payslip_data: dict, payslip_history: list[dict], financial_profile: dict
+) -> tuple[str, dict | None] | None:
+    """The domain that answers "what would my net pay be if I changed X on
+    my payslip" — added 2026-09-15, see payslip_math.py's module docstring
+    for the real gap this closes. Distinct from _simulate_tax_scenario's
+    additional_80c/80d/24b: those model EXTERNAL investments/insurance a
+    user adds on top of their existing salary (never touching net pay);
+    this models an actual change to a payslip component — always affects
+    net pay, and for PF specifically also affects the old-regime 80C pool.
+    """
+    field = scenario["payslip_field"]
+    if not field:
+        return None
+    if not payslip_data:
+        return "No payslip is on file — a payslip scenario needs one to compute against.", None
+
+    change = apply_field_change(
+        payslip_data,
+        field,
+        new_value=scenario["payslip_new_value"],
+        delta_amount=scenario["payslip_delta_amount"],
+        delta_percent_of_basic=scenario["payslip_delta_percent_of_basic"],
+    )
+    if change is None:
+        return f"\"{field}\" isn't a payslip component this can simulate a change to.", None
+
+    baseline_net = compute_net_pay(payslip_data)
+    scenario_net = compute_net_pay(change.scenario_payslip)
+    net_delta = scenario_net - baseline_net
+    direction = "more" if net_delta > 0 else "less" if net_delta < 0 else "the same as"
+
+    lines = [
+        f"Payslip scenario — {field_label(field)}: ₹{change.baseline_value:,.0f} → ₹{change.scenario_value:,.0f}.",
+        f"Net pay (already computed): ₹{baseline_net:,.0f} (baseline) → ₹{scenario_net:,.0f} (scenario) — "
+        f"₹{abs(net_delta):,.0f} {direction} per month.",
+    ]
+    table_rows = [
+        [field_label(field), f"₹{change.baseline_value:,.0f}", f"₹{change.scenario_value:,.0f}"],
+        ["Net pay (computed)", f"₹{baseline_net:,.0f}", f"₹{scenario_net:,.0f}"],
+    ]
+
+    # A change to a field that feeds annual gross income (basic/HRA/special
+    # allowance/bonus) or the old-regime 80C pool (PF) also moves old-
+    # regime tax liability — a real second effect, not just net pay. The
+    # old regime itself always applies regardless of payslip period (unlike
+    # a regime-SWITCH scenario, which regime_choice_available() gates
+    # elsewhere) — this only ever computes old-regime tax, never a switch.
+    if field in GROSS_PAY_FIELDS or field == "pfEmployee":
+        annual_income, income_note = estimate_annual_gross_income(payslip_data, payslip_history)
+        if annual_income > 0:
+            # This monthly change, applied for a full 12 months on top of
+            # whatever the existing annual estimate already is — the same
+            # kind of explicit, stated assumption estimate_annual_gross_
+            # income() itself already makes for a single month extrapolated
+            # x12, not a new precision claim this scenario invents.
+            monthly_gross_delta = compute_gross_pay(change.scenario_payslip) - compute_gross_pay(payslip_data)
+            scenario_annual_income = annual_income + monthly_gross_delta * 12
+
+            gaps = compute_all_gaps(financial_profile, payslip_data) if financial_profile else []
+            baseline_deductions = sum(g.used for g in gaps)
+            scenario_gaps = compute_all_gaps(financial_profile, change.scenario_payslip) if financial_profile else []
+            scenario_deductions = sum(g.used for g in scenario_gaps)
+
+            baseline_old = compute_old_regime_tax(annual_income, baseline_deductions)
+            scenario_old = compute_old_regime_tax(scenario_annual_income, scenario_deductions)
+            tax_delta = scenario_old.total_tax - baseline_old.total_tax
+            tax_direction = "more" if tax_delta > 0 else "less" if tax_delta < 0 else "the same as"
+            assumption_note = " (assuming this change applies for the full year)" if monthly_gross_delta else ""
+
+            lines.append(
+                f"Old-regime tax liability ({FY_LABEL}, income basis: {income_note}{assumption_note}): "
+                f"₹{baseline_old.total_tax:,.0f} → ₹{scenario_old.total_tax:,.0f} — "
+                f"₹{abs(tax_delta):,.0f} {tax_direction} per year."
+            )
+            table_rows.append(
+                ["Old-regime tax (computed)", f"₹{baseline_old.total_tax:,.0f}", f"₹{scenario_old.total_tax:,.0f}"]
+            )
+
+    table = {
+        "title": f"What-if: payslip — {field_label(field)}",
+        "headers": ["", "Baseline", "Scenario"],
+        "rows": table_rows,
     }
     return "\n".join(lines), table

@@ -56,6 +56,7 @@ from pydantic import BaseModel
 from agents.agent_framework_llm import agent_complete
 from agents.budget_agent import budget_agent_node
 from agents.conversation import format_conversation_for_prompt
+from agents.digest_agent import digest_agent_node
 from agents.goal_agent import goal_agent_node
 from agents.llm_metrics import LLMCallMetrics
 from agents.nudge_agent import nudge_agent_node
@@ -69,7 +70,9 @@ from compression import token_budget
 from compression.context_compressor import cap_session_history, compress_in_session
 from config import config
 
-AgentKey = Literal["payslip", "regulatory", "nudge", "spending", "goal", "budget", "whatif", "unsupported"]
+AgentKey = Literal[
+    "payslip", "regulatory", "nudge", "spending", "goal", "budget", "whatif", "digest", "unsupported"
+]
 
 # Same key set orchestrator.py's _AGENT_KEY_TO_NODE used, now mapping
 # directly to the node function object instead of a LangGraph node-name
@@ -90,6 +93,7 @@ AGENT_KEY_TO_DISPLAY_ID: dict[str, str] = {
     "goal": "goal_agent",
     "budget": "budget_agent",
     "whatif": "whatif_agent",
+    "digest": "digest_agent",
     "unsupported": "capability_gap_node",
 }
 
@@ -101,6 +105,7 @@ DEFAULT_AGENT_NODE_MAP: dict[str, Callable[[PayNexusState], dict]] = {
     "goal": goal_agent_node,
     "budget": budget_agent_node,
     "whatif": whatif_agent_node,
+    "digest": digest_agent_node,
     "unsupported": capability_gap_node,
 }
 
@@ -121,6 +126,7 @@ AGENT_KEY_TO_MODEL: dict[str, str] = {
     "goal": config.GOAL_AGENT_MODEL,
     "budget": config.BUDGET_AGENT_MODEL,
     "whatif": config.WHATIF_AGENT_MODEL,
+    "digest": config.DIGEST_AGENT_MODEL,
     "unsupported": config.PAYSLIP_AGENT_MODEL,
 }
 

@@ -34,6 +34,7 @@ class PayNexusState(TypedDict, total=False):
     goal_response: str           # V2 — GoalTracker, see agents/goal_agent.py
     budget_response: str         # V2 — BudgetPlanner, see agents/budget_agent.py
     scenario_response: str       # V2 — What-If Simulator, see agents/whatif_agent.py
+    digest_response: str         # V2.1 — Monthly Digest, see agents/digest_agent.py — synthesizes payslip/spending/budget/goal into one narrative, never a second source of truth for any figure
     unsupported_response: str    # set instead of the above when the request asks for an action no agent can perform (delete/edit/manage saved data) — see agents/orchestrator.py's capability_gap_node
     payslip_tables: List[dict]   # structured {title, headers, rows} tables built directly in Python (never by the LLM) alongside payslip_response — see tax_calculations.py/payslip_trends.py's *_table() builders
     nudge_tables: List[dict]     # same, alongside nudge_response
@@ -42,6 +43,7 @@ class PayNexusState(TypedDict, total=False):
     goal_tables: List[dict]      # same, alongside goal_response — see analytics/goal_progress.py's goal_progress_table
     budget_tables: List[dict]    # same, alongside budget_response — see budgeting/budgets.py's budget_vs_actual_table
     scenario_tables: List[dict]  # same, alongside scenario_response — built fresh per scenario in agents/whatif_agent.py, not from one shared *_table() builder
+    digest_tables: List[dict]    # same, alongside digest_response
 
     # Exact per-call token/cost metrics (agents/llm_metrics.py) — one list
     # per node that makes an LLM call, same parallel-fan-out-safe pattern
@@ -57,6 +59,7 @@ class PayNexusState(TypedDict, total=False):
     goal_llm_calls: List[LLMCallMetrics]
     budget_llm_calls: List[LLMCallMetrics]
     scenario_llm_calls: List[LLMCallMetrics]
+    digest_llm_calls: List[LLMCallMetrics]
     orchestrator_llm_calls: List[LLMCallMetrics]
 
     # Final (set by assembler_node)

@@ -14,11 +14,36 @@ Run from backend/: uvicorn api.main:app
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 from api.routes import auth, budget, chat, financial_profile, goals, payslip, statement
 from config import config
+from security.rate_limit import limiter
+
+# Opt-in, not automatic: only runs when APPLICATIONINSIGHTS_CONNECTION_STRING
+# is actually set (deployed App Service only -- see config.py). Every local/
+# CI/test run has it unset and this whole block is a no-op, so nothing about
+# existing dev/test behavior changes. Auto-instruments FastAPI (request
+# latency, status codes, exceptions) and outbound httpx/requests calls with
+# no per-route code -- this is what closes the "no APM/tracing, every number
+# in the README came from a one-off command" gap (see PayNexus Scorecard.html
+# Ops/cost section).
+if config.APPLICATIONINSIGHTS_CONNECTION_STRING:
+    from azure.monitor.opentelemetry import configure_azure_monitor
+
+    configure_azure_monitor(connection_string=config.APPLICATIONINSIGHTS_CONNECTION_STRING)
 
 app = FastAPI(title="PayNexus API", version="2.0.0")
+
+if config.APPLICATIONINSIGHTS_CONNECTION_STRING:
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+    FastAPIInstrumentor.instrument_app(app)
+
+# See security/rate_limit.py's docstring for why this exists and its scope.
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,

@@ -95,6 +95,13 @@ class Config:
     # payslip_extraction.py/statement_extraction.py: structured extraction
     # of what the user explicitly typed, not financial reasoning itself.
     WHATIF_AGENT_MODEL: str = "gpt-4o"
+
+    # --- V2.1: Monthly Digest ---
+    # Cloud-only gpt-4o, same tier as Payslip/SpendingAnalyser/Foresight —
+    # this agent synthesizes across every domain in one narrative, so an
+    # inaccurate word choice ("spending is up" when it's actually flat)
+    # misrepresents four domains at once, not just one.
+    DIGEST_AGENT_MODEL: str = "gpt-4o"
     WHATIF_EXTRACTION_MODEL: str = "gpt-4o-mini"
 
     # --- RAG ---
@@ -122,6 +129,15 @@ class Config:
     JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "")
     JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
     JWT_EXPIRE_MINUTES: int = int(os.getenv("JWT_EXPIRE_MINUTES", "60"))
+
+    # --- Observability ---
+    # Empty by default -- app.main only calls configure_azure_monitor() when
+    # this is actually set (see api/main.py), so every existing local/CI/test
+    # environment keeps working with zero behavior change. Set this to a real
+    # Application Insights connection string (Azure Portal -> the App
+    # Insights resource -> Overview) only on the deployed App Service, via
+    # its own app setting -- never commit a real value here.
+    APPLICATIONINSIGHTS_CONNECTION_STRING: str = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING", "")
 
     # --- CORS ---
     # Comma-separated origins, e.g. "http://localhost:5173,https://paynexus.azurestaticapps.net".

@@ -14,10 +14,23 @@ from typing import Literal
 from pydantic import BaseModel
 
 
+class HistoricalLabel(BaseModel):
+    """One (description, category) pair from the client's own already-
+    decrypted transaction history, sent to power the logistic regression
+    categorization tier (categorization/ml_classifier.py) — never persisted
+    server-side, see that module's docstring for the full reasoning. Optional
+    on every request that accepts it; omitting it (or sending too few) just
+    means that tier is skipped for this request, same as always."""
+
+    description: str
+    category: str
+
+
 class StatementParseRequest(BaseModel):
     text: str
     source_account: str
     format: Literal["pdf", "csv"]
+    historical_labels: list[HistoricalLabel] = []
 
 
 class ManualTransactionRequest(BaseModel):
@@ -45,6 +58,25 @@ class ManualTransactionRequest(BaseModel):
     source_account: str
     category: str | None = None
     occurrence: int = 0
+    historical_labels: list[HistoricalLabel] = []
+
+
+class AnalyticsRequest(BaseModel):
+    """POST /statement/analytics — powers the Bank statements tab's charts
+    (category-breakdown pie, net-savings-trend line with a linear-regression
+    projection). `transactions` is the same flattened, already-decrypted
+    shape /chat's own `transactions` field takes (list[dict], not a strict
+    schema — see analytics/spending_trends.py's module docstring for the
+    dict-only fields it reads that models.Transaction itself doesn't
+    declare). Plaintext in, plaintext out, nothing persisted — same
+    contract as every other endpoint in this file."""
+
+    transactions: list[dict] = []
+
+
+class AnalyticsResponse(BaseModel):
+    category_breakdown: list[dict]  # [{category, total_spent}, ...], highest first
+    savings_projection: dict | None  # None when there's not enough history to project — see analytics/spending_trends.py's project_net_savings
 
 
 class TransactionOut(BaseModel):

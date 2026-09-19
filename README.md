@@ -81,7 +81,7 @@ capability-gap node instead of being silently misrouted or hallucinated as done.
 | SpendingAnalyser | gpt-4o | Bank-statement transactions: category breakdowns, recurring merchants, the subscriptions-specific filter |
 | BudgetPlanner | Hybrid | Actual spend vs. saved per-category budget targets — period-prorated so a statement longer than a month doesn't falsely read as overspending |
 | GoalTracker | Hybrid | Savings-goal progress and whether the current pace hits a target date |
-| Foresight (What-If) | gpt-4o | Explicit hypotheticals — "what if I switched regime / cut my budget by ₹1,000 / saved ₹500 more toward a goal" |
+| Foresight (What-If) | gpt-4o | Explicit hypotheticals — "what if I switched regime / cut my budget by ₹1,000 / saved ₹500 more toward a goal / contributed 2% more to PF" |
 
 A user never has to ask to be warned, either — client-side, no-LLM proactive alerts (ITR deadline,
 regime-declaration window, deduction headroom, stale payslip/statement, over-budget category,
@@ -99,6 +99,17 @@ alert via `localStorage`.
 | `paynexus-db-ramya` | PostgreSQL 16 + `pgvector`, separate `paynexus` (V1) / `paynexus_v2` (V2) databases on the same server | Azure Database for PostgreSQL Flexible Server (Burstable B1MS) |
 | `ramya192/paynexus-backend` | Backend container image — `:latest`/`:<sha>` tags for V1, `:v2-latest`/`:v2-<sha>` for V2, same repo | Docker Hub (free tier) |
 
+**Infrastructure as Code**: `infra/v2-core.bicep` describes the App Service Plan, `paynexus-api-v2`,
+`paynexus-web-v2`, and (added 2026-09-14) an Application Insights resource + its Log Analytics
+workspace declaratively — the pieces above that were originally provisioned by hand via one-off
+`az` CLI commands. Deliberately scoped to just those (not the shared Postgres server or the
+Foundry capability-host stack — see the file's own header comment for why those specifically stay
+manual). Validate without deploying anything: `az bicep build --file infra/v2-core.bicep`. Never
+applied automatically by CI — a real deploy is a deliberate `az deployment group create`, run by a
+human, not triggered by a push. If a deploy ever does go wrong, `infra/ROLLBACK.md` has the actual
+steps — a backend Docker re-tag/re-push, or a frontend Static Web Apps re-deploy — not just a note
+that rollback is "possible."
+
 CI/CD: two independent workflows, so V1's and V2's *builds* never cross-trigger each other —
 `.github/workflows/deploy.yml` (pushes to `main` → `paynexus-api`/`paynexus-web`) and
 `.github/workflows/deploy-v2.yml` (pushes to `foundry-v2` → `paynexus-api-v2`/`paynexus-web-v2`,
@@ -112,6 +123,10 @@ each App Service's CD webhook only ever re-pulls the specific tag it's configure
 Both webhooks need "SCM Basic Auth Publishing Credentials" enabled (Settings → Configuration) to
 even retrieve their URL from Deployment Center — found disabled on both apps (silently breaking
 auto-deploy, V1 probably for a while) and fixed 2026-08-17, re-verified against a real push after.
+Every push also runs `pytest`+coverage, `pip-audit` (dependency CVEs), `bandit` (this repo's own
+code), and (once the image is built) `Trivy` (the actual container's OS-level CVEs) — all four
+non-blocking, posting to the run summary rather than gating the deploy; see the Observability
+section below for why non-blocking is a deliberate choice here, not a missing gate.
 This is also why V2 has its *own* separate database (`paynexus_v2`) rather than sharing V1's live
 one — V2's still-evolving feature set writing into the same store V1's real users are on would be a
 real data-integrity risk, not just a deploy-pipeline one. Real ongoing cost: **~$34/month** (Postgres
@@ -186,6 +201,22 @@ Every agent's JSON contract is now a Pydantic model instead of a hand-parsed dic
 returns an already-validated instance, not raw text needing `json.loads` + `try/except`), and the
 intent classifier lost its manual JSON parsing the same way.
 
+**A fourth example, found answering a real user question (2026-09-15):** "what would my net pay be
+if I contributed 2% more to PF?" turned out to have no real answer — nothing anywhere in this
+codebase actually computed a net pay figure. The Payslip Reasoning agent handed the LLM raw payslip
+components and let it narrate/derive take-home in its own words, exactly the "LLM invents a number"
+failure mode every other money calculation here (`tax_calculations.py`, `tax_slabs.py`,
+`payslip_trends.py`) was specifically built to avoid — it had just never been noticed for net pay
+itself. Fixed with a new `payslip_math.py` module (`compute_net_pay`, `compute_gross_pay`) used in
+two places at once: the *existing* Payslip Reasoning agent's regular narration (a real, always-on
+correctness fix — "why did my take-home drop" now cites an exact computed ₹ figure, including a new
+net-pay trend across saved months, not just individual basic/HRA/TDS trends) and a new fourth
+domain in the What-If Simulator (`payslip_field`/`payslip_delta_percent_of_basic` — the LLM extracts
+the raw percentage the user stated, Python does the actual rupee arithmetic against real basic
+salary, never the model). Live-verified against the real Foundry backend, not just unit tests: a
+2% PF increase on a ₹70,000 basic correctly computed a ₹1,400/month net pay drop and the resulting
+old-regime tax change, matched by hand against the slab math independently.
+
 ## Stack
 
 | Area | Choice | Why |
@@ -201,12 +232,20 @@ intent classifier lost its manual JSON parsing the same way.
 
 ## Testing
 
-- **`backend/tests/`** — 276 pytest tests, zero setup (`cd backend && pytest`) — unit tests covering
+- **`backend/tests/`** — 440 pytest tests, zero setup (`cd backend && pytest`) — unit tests covering
   every concrete bug this build found across V1, V2, and the V2.1 Agent Framework migration (tax
   slab math, deduction gaps, trends, compression, table dedup, budget period-proration,
   duplicate-transaction-ID disambiguation, Ollama's markdown-fence JSON issue,
   `ConcurrentBuilder` fan-out/merge wiring), plus `@pytest.mark.integration` tests that hit the real
   Foundry/OpenAI APIs.
+- **Coverage: 80.0% branch coverage** (`pytest --cov=.`, config in `.coveragerc`) on the
+  deterministic, non-integration tier — measured on application code only (test files and one-off
+  eval/build scripts excluded from the denominator, since counting a test file's coverage of itself
+  isn't meaningful). This undercounts real coverage: several agent node functions' actual LLM-call
+  bodies are exercised only by the `@pytest.mark.integration` tier (real Foundry/OpenAI calls, not
+  run in CI without live credentials), so their lines show as "missed" here despite being covered
+  by a real test elsewhere. Generated on every CI run (`deploy-v2.yml`'s coverage summary step), not
+  a one-off number.
 - **`backend/rag/eval.py`** — retrieval hit-rate@k, MRR, and generation keyword-coverage against a
   hand-verified ground-truth set. Current: 94% hit-rate, 0.853 MRR, 100% keyword coverage.
 - **`backend/agent_eval/eval.py`** — the same keyword-coverage approach for narrated agent answers,
@@ -219,6 +258,120 @@ intent classifier lost its manual JSON parsing the same way.
   `v2_flows_driver_part2.mjs` for V2's — registration through every CRUD flow, proactive alerts,
   the subscriptions filter, capability-gap responses, and cross-session memory, verified against
   the real network request, not LLM wording).
+
+## Performance (2026-09-13, real timed `/chat` calls against the live backend)
+
+Small sample sizes on purpose — this measures actual real Foundry API latency, not a mock, so every
+call has a real (small) cost:
+
+| | Sample | Median | Range |
+|---|---|---|---|
+| Single-agent turn (classifier + 1 agent) | n=8 | **8.1s** | 6.7s–9.2s, plus one 26.6s cold-start outlier (first call after a fresh backend restart) |
+| Multi-agent turn (classifier + 3 agents, concurrent fan-out) | n=4 | **8.5s** | 7.4s–12.8s |
+
+The real finding: a 3-agent turn's median (8.5s) is barely above a 1-agent turn's (8.1s) — direct
+evidence the `asyncio.gather`-based concurrent fan-out (see the migration section below) is doing
+its job; agents run in parallel, not stacked serially, so adding agents costs latency roughly equal
+to the slowest one, not the sum of all of them. The cold-start outlier is a separate, already-known
+characteristic of Foundry's GlobalStandard capacity tier under an idle-then-first-call pattern, not
+a fan-out cost.
+
+## Unit economics (real, from one measured turn's actual `response.usage`)
+
+A single-agent turn's real cost, straight from the app's own per-call cost tracking
+(`agents/llm_metrics.py`, sourced from OpenAI/Foundry's own `response.usage`, never estimated):
+
+| Call | Model | Tokens (in/out) | Cost |
+|---|---|---|---|
+| Intent classifier | gpt-4o | 1,865 / 8 | $0.00474 |
+| Regulatory agent (this turn's 1 selected agent) | gpt-4.1-mini | 1,959 / 27 | $0.00083 |
+| **Total, this turn** | | | **$0.00557 (~₹0.47)** |
+
+The genuinely interesting finding here, not the headline number: **the classifier costs more than
+the actual answer** — it runs on gpt-4o for classification accuracy, while this hybrid-tier question
+was answered by the cheaper gpt-4.1-mini. The classifier is a fixed per-turn cost regardless of how
+many agents get selected; a multi-agent turn adds roughly $0.0008–$0.005 per additional agent
+depending on its tier (hybrid gpt-4.1-mini vs. cloud-only gpt-4o), so a 3-agent turn costs in the
+neighborhood of **$0.011–$0.016 (~₹0.9–1.3)** — extrapolated from this same real per-call pricing,
+not a second live measurement.
+
+## Observability (2026-09-14)
+
+Added specifically to close a gap the honest scorecard review flagged: every number in the
+Performance and Unit economics sections above came from a one-off manual measurement, not
+something anyone could go check live.
+
+- **Application Insights, opt-in and off by default.** `api/main.py` only calls
+  `configure_azure_monitor()` when `APPLICATIONINSIGHTS_CONNECTION_STRING` is set — every local
+  run, CI run, and test run has it unset, so this is a zero-behavior-change addition, verified
+  both ways (import succeeds identically with the var unset, and with a syntactically-valid
+  connection string set, no live resource needed to prove the wiring itself works). Auto-
+  instruments FastAPI request latency/status/exceptions and outbound `httpx` calls with no
+  per-route code once it's actually on.
+- **`infra/v2-core.bicep` now declares the Application Insights resource + its backing Log
+  Analytics workspace**, wired to the backend Web App's own `APPLICATIONINSIGHTS_CONNECTION_STRING`
+  app setting — so turning this on for real is one `az deployment group create` away, not a
+  separate manual Azure Portal click-through. Both resources are free at this app's traffic (App
+  Insights' free 5GB/month ingestion grant). **Honest status: written and validated
+  (`az bicep build`), not yet deployed** — same "never applied automatically by CI" rule as the
+  rest of this file, so there's currently no *live* dashboard yet, only the capability to stand
+  one up in one command.
+- **CI now runs two more scans, both non-blocking (report, don't gate — a new finding shouldn't
+  silently block a deploy with no human decision, same reasoning as the existing `pip-audit`
+  step)**: `bandit` (static analysis of this repo's own Python code — pip-audit only covers
+  third-party dependency CVEs) and `Trivy` (scans the actual container image being deployed for
+  OS-level CVEs, not just `requirements.txt` on disk). Both post a summary to the run and upload a
+  full report artifact. First real run of `bandit` found one genuine (low-severity) issue — a
+  SHA1 hash used as a transaction dedup fingerprint (`models.py`), not for anything cryptographic
+  — fixed by marking it `usedforsecurity=False` rather than suppressed; two other Low findings
+  (a non-crypto `random.uniform()` call, a module-level `assert` sanity check) were reviewed and
+  are correctly non-issues.
+- **`infra/ROLLBACK.md`** — a written rollback runbook (re-tag/re-push the last-known-good Docker
+  image, or point the App Service straight at it via `az webapp config container set`; re-run a
+  past Static Web Apps deployment for the frontend). Explicitly documents what it *doesn't* cover
+  too (no automated rollback trigger, no DB down-migration story) rather than overclaiming.
+
+## Security review (2026-09-13)
+
+A real pass, not a checkbox — direct code search for each finding, not assumed from the
+architecture description above.
+
+**Checked and confirmed solid:**
+- **Broken Object Level Authorization (OWASP API1)** — every goal/budget/statement/payslip
+  route checks `resource.user_id != current_user.id` before returning or mutating anything (16
+  such checks across the route files, confirmed by direct `grep`) — a user cannot reach another
+  user's data by guessing an ID.
+- **CORS** — `allow_origins` reads from `CORS_ORIGINS`, defaults to `localhost` only; never a
+  wildcard.
+- **Auth fundamentals** — passwords hashed with `bcrypt` (not a fast general-purpose hash), JWTs
+  expire in 60 minutes, and login already returns the *same* error for "no such user" and "wrong
+  password" — a genuine anti-enumeration practice that predates this review, not added by it.
+
+**Found and fixed:**
+- **No rate limiting on `/auth/login` or `/auth/register` (OWASP API4)** — either could be hit as
+  fast as the network allowed; a brute-force password guess or a registration-spam script had
+  nothing slowing it down. Added `slowapi`-based limits (`security/rate_limit.py`): 10/minute on
+  login, 5/minute on register (tighter, since spamming new accounts is the more expensive abuse
+  case). Verified with real tests that actually trigger a 429 (`tests/test_auth_routes.py`), not
+  just presence of the decorator.
+- **No static analysis of this repo's own code (2026-09-14)** — `pip-audit` only ever covered
+  third-party dependency CVEs, never bugs in code we wrote. Added `bandit` to CI (see
+  Observability section above); its first real run found a SHA1 hash used as a non-cryptographic
+  dedup fingerprint (`models.py`) — fixed by marking it `usedforsecurity=False` so the intent is
+  explicit rather than leaving a bare call for the scanner to keep re-flagging.
+
+**Found and disclosed, not fixed (no fix exists):**
+- **`ecdsa` 0.19.2 has a known Minerva timing-attack CVE** (`PYSEC-2026-1325`, via `pip-audit`) — a
+  transitive dependency (likely pulled in for JWT signing support), and the upstream project has
+  explicitly stated side-channel attacks are out of scope for their project, with no planned fix.
+  Low practical severity here (a timing side-channel needs sustained local network access to the
+  signing operation, not a remote drive-by), disclosed rather than silently accepted. Now scanned
+  on every CI run (`deploy-v2.yml`'s dependency vulnerability summary step), so a new CVE surfaces
+  automatically instead of requiring someone to remember to run `pip-audit` locally.
+
+**Not done, explicitly out of scope for this pass:** a full penetration test, SSRF/injection
+fuzzing, and a formal threat model. This is a focused OWASP-API-Top-10-style pass against the
+actual route code, not a substitute for one.
 
 ## Layout
 
