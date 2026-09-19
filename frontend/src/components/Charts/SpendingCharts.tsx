@@ -111,21 +111,24 @@ function CategoryPieChart({ data }: { data: AnalyticsResult["category_breakdown"
             nameKey="category"
             cx="50%"
             cy="50%"
-            outerRadius={90}
-            // recharts' own PieLabelRenderProps type doesn't know about our
-            // custom nameKey/dataKey field names, only its generic `name`/
-            // `percent` -- typed loosely here rather than fighting recharts'
-            // generics for a label callback, same pragmatic tradeoff most
-            // recharts consumers make.
-            label={(props: { name?: string; percent?: number }) =>
-              `${props.name ?? ""} (${((props.percent ?? 0) * 100).toFixed(0)}%)`
-            }
+            outerRadius={80}
+            // Percent-only on-slice labels -- full "Category (X%)" labels used
+            // to run past the chart's right edge and get clipped in the
+            // half-width grid column, especially with several small slices
+            // bunched together. Category names live in the Legend below
+            // instead, which wraps properly rather than clipping.
+            label={(props: { percent?: number }) => `${((props.percent ?? 0) * 100).toFixed(0)}%`}
           >
             {data.map((entry, i) => (
               <Cell key={entry.category} fill={PIE_COLORS[i % PIE_COLORS.length]} />
             ))}
           </Pie>
           <Tooltip formatter={(value: unknown) => `₹${Number(value ?? 0).toLocaleString("en-IN")}`} />
+          <Legend
+            layout="horizontal"
+            verticalAlign="bottom"
+            wrapperStyle={{ fontSize: 11 }}
+          />
         </PieChart>
       </ResponsiveContainer>
     </div>

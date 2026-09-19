@@ -140,7 +140,7 @@ function deductionHeadroomAlert(now: Date, financialProfile: FinancialProfile | 
   return {
     id: "deduction-headroom",
     title: "Unused tax deduction room before the financial year closes",
-    message: `You have roughly ₹${totalRemaining.toLocaleString("en-IN")} of unused 80C/80D/24(b) deduction room, and the financial year closes March 31 — ask the Savings Advisor for the exact breakdown before it's too late to invest.`,
+    message: `You have roughly ₹${totalRemaining.toLocaleString("en-IN", { maximumFractionDigits: 0 })} of unused 80C/80D/24(b) deduction room, and the financial year closes March 31 — ask the Savings Advisor for the exact breakdown before it's too late to invest.`,
     severity: "warning",
   };
 }
@@ -254,7 +254,7 @@ function overspendingAlert(transactions: Record<string, unknown>[], budget: Budg
   return {
     id: "budget-overspending",
     title: overCategories.length === 1 ? `Over budget on ${worst.category}` : `Over budget on ${overCategories.length} categories`,
-    message: `${worst.category}: ₹${worst.spent.toLocaleString("en-IN")} spent vs ₹${worst.limit.toLocaleString("en-IN")} budgeted for ${period} (₹${overBy.toLocaleString("en-IN")} over)${extra > 0 ? ` — plus ${extra} more categor${extra === 1 ? "y" : "ies"}` : ""}. Ask the BudgetPlanner for the full breakdown.`,
+    message: `${worst.category}: ₹${worst.spent.toLocaleString("en-IN", { maximumFractionDigits: 0 })} spent vs ₹${worst.limit.toLocaleString("en-IN", { maximumFractionDigits: 0 })} budgeted for ${period} (₹${overBy.toLocaleString("en-IN", { maximumFractionDigits: 0 })} over)${extra > 0 ? ` — plus ${extra} more categor${extra === 1 ? "y" : "ies"}` : ""}. Ask the BudgetPlanner for the full breakdown.`,
     severity: "warning",
   };
 }
