@@ -156,7 +156,13 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Bumped from 20 -- vitest's jsdom environment pulls in undici's
+          # Cache API polyfill, whose constructor calls a Node-internal
+          # webidl function (markAsUncloneable) that doesn't exist on
+          # Node 20, only on newer Node. Passed locally (this machine runs
+          # Node 24) and only failed here, in CI specifically, once `npm
+          # test` actually started running there for the first time.
+          node-version: 24
 
       - run: npm ci
 
