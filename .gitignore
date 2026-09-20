@@ -15,6 +15,7 @@ build/
 *.faiss
 *.index
 .DS_Store
+infra/*.json
 
 PROJECT_CONTEXT.md
 CHANGELOG.md

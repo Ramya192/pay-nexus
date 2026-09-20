@@ -106,9 +106,10 @@ workspace declaratively — the pieces above that were originally provisioned by
 Foundry capability-host stack — see the file's own header comment for why those specifically stay
 manual). Validate without deploying anything: `az bicep build --file infra/v2-core.bicep`. Never
 applied automatically by CI — a real deploy is a deliberate `az deployment group create`, run by a
-human, not triggered by a push. If a deploy ever does go wrong, `infra/ROLLBACK.md` has the actual
-steps — a backend Docker re-tag/re-push, or a frontend Static Web Apps re-deploy — not just a note
-that rollback is "possible."
+human, not triggered by a push; this file has genuinely been used for one such real deploy
+(2026-09-20 — see the Observability section below for what it turned up). If a deploy ever does go
+wrong, `infra/ROLLBACK.md` has the actual steps — a backend Docker re-tag/re-push, or a frontend
+Static Web Apps re-deploy — not just a note that rollback is "possible."
 
 CI/CD: two independent workflows, so V1's and V2's *builds* never cross-trigger each other —
 `.github/workflows/deploy.yml` (pushes to `main` → `paynexus-api`/`paynexus-web`) and
@@ -123,10 +124,12 @@ each App Service's CD webhook only ever re-pulls the specific tag it's configure
 Both webhooks need "SCM Basic Auth Publishing Credentials" enabled (Settings → Configuration) to
 even retrieve their URL from Deployment Center — found disabled on both apps (silently breaking
 auto-deploy, V1 probably for a while) and fixed 2026-08-17, re-verified against a real push after.
-Every push also runs `pytest`+coverage, `pip-audit` (dependency CVEs), `bandit` (this repo's own
-code), and (once the image is built) `Trivy` (the actual container's OS-level CVEs) — all four
+Every push runs `pytest`+coverage and (as of 2026-09-19) the frontend's own `npm test` — both
+genuinely **blocking**, the same role `pytest` has always had; a broken test on either side stops
+the deploy. Alongside those, `pip-audit` (dependency CVEs), `bandit` (this repo's own code), and
+(once the image is built) `Trivy` (the actual container's OS-level CVEs) all run too, but
 non-blocking, posting to the run summary rather than gating the deploy; see the Observability
-section below for why non-blocking is a deliberate choice here, not a missing gate.
+section below for why non-blocking is a deliberate choice there, not a missing gate.
 This is also why V2 has its *own* separate database (`paynexus_v2`) rather than sharing V1's live
 one — V2's still-evolving feature set writing into the same store V1's real users are on would be a
 real data-integrity risk, not just a deploy-pipeline one. Real ongoing cost: **~$34/month** (Postgres
@@ -229,6 +232,7 @@ old-regime tax change, matched by hand against the slab math independently.
 | Vector store | pgvector on the same Postgres instance | One database instead of a separate vector service |
 | LLM provider | Azure AI Foundry (gpt-4o / gpt-4.1-mini via Agent Framework's `FoundryChatClient`; V2 called OpenAI directly), local Ollama fallback for hybrid agents | Genuine Foundry Agent Service integration — see migration section above |
 | Statement ingestion | CSV parsed directly (no LLM); PDF text extracted client-side (pdfjs-dist) and structured via GPT-4o | The PDF itself never reaches the server, only extracted text does |
+| Frontend testing | Vitest + React Testing Library | 282 tests (stores, API layer, all components) — see Testing below |
 
 ## Testing
 
@@ -258,6 +262,20 @@ old-regime tax change, matched by hand against the slab math independently.
   `v2_flows_driver_part2.mjs` for V2's — registration through every CRUD flow, proactive alerts,
   the subscriptions filter, capability-gap responses, and cross-session memory, verified against
   the real network request, not LLM wording).
+- **`frontend/src/` — 282 Vitest + React Testing Library tests** (`npm test`), a real, blocking CI
+  gate alongside `pytest` rather than an afterthought: all 10 Zustand stores, all 8 API modules
+  (including a hand-rolled Server-Sent-Events stream parser test for the chat endpoint's manual SSE
+  reader), and all 27 components — asserting on actual branch conditions and derived state (a
+  goal's live-valuation override, a form's error-recovery path, a component's accessibility label
+  wiring), not snapshots. Writing this suite itself surfaced and fixed several real, previously-
+  shipped bugs, the same "found via a real test, not assumed correct" standard the backend section
+  above holds itself to: a decimal-formatting bug that leaked a raw prorated float into three
+  separate UI surfaces (once found in one place, proactively grepped and fixed everywhere the same
+  pattern existed); a credit-card statement's payment-retry flow where a failed save left a stale,
+  still-clickable "Save" button rendered underneath the retry UI (risking a duplicate save attempt)
+  while the actual retry-failure error message had its display condition inverted and could never
+  be seen at all; and seven components missing `htmlFor`/`id` label associations entirely — a real
+  accessibility gap where a screen reader announced no label for any of those fields.
 
 ## Performance (2026-09-13, real timed `/chat` calls against the live backend)
 
@@ -308,14 +326,22 @@ something anyone could go check live.
   connection string set, no live resource needed to prove the wiring itself works). Auto-
   instruments FastAPI request latency/status/exceptions and outbound `httpx` calls with no
   per-route code once it's actually on.
-- **`infra/v2-core.bicep` now declares the Application Insights resource + its backing Log
-  Analytics workspace**, wired to the backend Web App's own `APPLICATIONINSIGHTS_CONNECTION_STRING`
-  app setting — so turning this on for real is one `az deployment group create` away, not a
-  separate manual Azure Portal click-through. Both resources are free at this app's traffic (App
-  Insights' free 5GB/month ingestion grant). **Honest status: written and validated
-  (`az bicep build`), not yet deployed** — same "never applied automatically by CI" rule as the
-  rest of this file, so there's currently no *live* dashboard yet, only the capability to stand
-  one up in one command.
+- **`infra/v2-core.bicep` declares the Application Insights resource + its backing Log Analytics
+  workspace**, wired to the backend Web App's own `APPLICATIONINSIGHTS_CONNECTION_STRING` app
+  setting. **Deployed for real, 2026-09-20** (`az deployment group create`, run by hand, same
+  "never applied automatically by CI" rule as the rest of this file — a real deploy is still a
+  deliberate human decision, not a push side effect) — both resources are live in `paynexus-rg`,
+  and the deploy was verified against the running app afterward (a real `POST /auth/register`
+  succeeded post-deploy, confirming every other app setting survived intact), not just trusted
+  from `provisioningState: Succeeded`. Both resources stay free at this app's traffic (App
+  Insights' free 5GB/month ingestion grant). Two real region-availability bugs were found and
+  fixed live in the process, not caught by `az bicep build` or even `what-if`: neither
+  `Microsoft.OperationalInsights/workspaces` nor `Microsoft.Web/staticSites` has ever been
+  available in `indiasouthcentral` (the resource group's own region) — the first needed a
+  dedicated `centralindia` param for the new observability resources, and the second revealed that
+  the live frontend has actually been running in **Central US** the whole time, a fact nobody had
+  verified before. Application Insights' **Live Metrics**/**Transaction search** in the Azure
+  Portal now show real traffic as the app is used.
 - **CI now runs two more scans, both non-blocking (report, don't gate — a new finding shouldn't
   silently block a deploy with no human decision, same reasoning as the existing `pip-audit`
   step)**: `bandit` (static analysis of this repo's own Python code — pip-audit only covers
@@ -388,11 +414,12 @@ paynexus-v2/
 │   ├── compression/      context compression + its eval harness
 │   ├── security/         auth, password hashing
 │   ├── db/                SQLAlchemy models, session handling
-│   ├── tests/             265 pytest tests
+│   ├── tests/             440 pytest tests
 │   ├── alembic/          migrations — alembic upgrade head before first run
 │   ├── Dockerfile         real, tested container for App Service
 │   └── ...                FastAPI app, statement/payslip extraction, tax computation modules
-├── frontend/              React 19 + TypeScript + Tailwind v4 (Vite)
+├── frontend/              React 19 + TypeScript + Tailwind v4 (Vite) — 282 Vitest tests (stores,
+│                          API layer, all 27 components), `npm test`
 │   └── src/components/    Auth, Dashboard (tabs), Chat, ChatWidget, Alerts, GoalTracker,
 │                          BudgetPlanner, StatementUploader, PayslipUploader, FinancialProfile
 ├── rag_documents/         Indian tax-law source docs embedded into pgvector
