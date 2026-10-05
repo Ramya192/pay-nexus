@@ -105,18 +105,6 @@ def retrieve_with_scores(query: str, k: int = config.RAG_TOP_K) -> list[tuple[Do
     return _store().similarity_search_with_score(query, k=k)
 
 
-def retrieve_as_context(query: str, k: int = config.RAG_TOP_K) -> str:
-    """Retrieve and join chunks into one string, ready for prompt injection.
-
-    Each chunk is prefixed with its source file so the Regulatory Agent can
-    ground its answer ("per the Budget 2025-26 Finance Bill highlights...").
-    """
-    chunks = retrieve(query, k=k)
-    return "\n\n---\n\n".join(
-        f"[source: {doc.metadata.get('source', 'unknown')}]\n{doc.page_content}" for doc in chunks
-    )
-
-
 def is_cached_answer_expired(doc: Document) -> bool:
     """True if `doc` is a web-search-fallback answer (see cache_web_answer)
     older than _CACHE_TTL_DAYS. Always False for a curated rag_documents/

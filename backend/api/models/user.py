@@ -26,8 +26,3 @@ class TokenResponse(BaseModel):
     encryption_salt: str
 
 
-class UserOut(BaseModel):
-    id: str
-    email: EmailStr
-
-    model_config = {"from_attributes": True}

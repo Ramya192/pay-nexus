@@ -277,7 +277,7 @@ original plan and dropped — manual cash entry closes the same gap more simply.
 
 ## Testing
 
-- **`backend/tests/`** — 473 pytest tests (454 offline + 19 live-integration), zero setup (`cd backend && pytest`) — unit tests covering
+- **`backend/tests/`** — 509 pytest tests (490 offline + 19 live-integration), zero setup (`cd backend && pytest`) — unit tests covering
   every concrete bug this build found across V1, V2, and the V2.1 Agent Framework migration (tax
   slab math, deduction gaps, trends, compression, table dedup, budget period-proration,
   duplicate-transaction-ID disambiguation, Ollama's markdown-fence JSON issue,
@@ -303,12 +303,7 @@ original plan and dropped — manual cash entry closes the same gap more simply.
   HTML report per run. Covers routing for every agent, cross-domain privacy isolation, tax-regime
   math hand-checked against Budget 2025-26, What-If, duplicate detection, and regression tests for a
   real Foundry hang and a regulatory cache false positive. Deliberately not mocked.
-- **`.claude/skills/run-paynexus/`** — the agent-facing runbook: direct Python invocation, `curl`
-  recipes, and Playwright drivers (`driver.mjs` for V1's flow, `v2_flows_driver.mjs` +
-  `v2_flows_driver_part2.mjs` for V2's — registration through every CRUD flow, proactive alerts,
-  the subscriptions filter, capability-gap responses, and cross-session memory, verified against
-  the real network request, not LLM wording).
-- **`frontend/src/` — 289 Vitest + React Testing Library tests** (`npm test`), a real, blocking CI
+- **`frontend/src/` — 306 Vitest + React Testing Library tests** (`npm test`), a real, blocking CI
   gate alongside `pytest` rather than an afterthought: all 10 Zustand stores, all 8 API modules
   (including a hand-rolled Server-Sent-Events stream parser test for the chat endpoint's manual SSE
   reader), and all 27 components — asserting on actual branch conditions and derived state (a
@@ -459,17 +454,16 @@ paynexus-v2.1/
 │   ├── compression/      context compression + its eval harness
 │   ├── security/         auth, password hashing
 │   ├── db/                SQLAlchemy models, session handling
-│   ├── tests/             473 pytest tests
+│   ├── tests/             509 pytest tests
 │   ├── alembic/          migrations — alembic upgrade head before first run
 │   ├── Dockerfile         real, tested container for App Service
 │   └── ...                FastAPI app, statement/payslip extraction, tax computation modules
-├── frontend/              React 19 + TypeScript + Tailwind v4 (Vite) — 289 Vitest tests (stores,
+├── frontend/              React 19 + TypeScript + Tailwind v4 (Vite) — 306 Vitest tests (stores,
 │                          API layer, all 27 components), `npm test`
 │   └── src/components/    Auth, Dashboard (tabs), Chat, ChatWidget, Alerts, GoalTracker,
 │                          BudgetPlanner, StatementUploader, PayslipUploader, FinancialProfile
 ├── infra/                 v2-core.bicep (App Service, Static Web App, App Insights) + ROLLBACK.md
 ├── rag_documents/         Indian tax-law source docs embedded into pgvector
-├── .claude/skills/run-paynexus/   agent-facing runbook — direct invocation, curl, Playwright
 └── .github/workflows/     CI/CD to Azure (Docker Hub + Static Web Apps) — `deploy-v2.yml` watches `foundry-v2`
 ```
 
@@ -489,7 +483,7 @@ python -m venv .venv && .venv\Scripts\activate
 pip install -r requirements.txt
 alembic upgrade head        # schema setup — required once, before first run
 python -m rag.build_index   # only needed once, or after editing rag_documents/
-uvicorn api.main:app        # no --reload — see .claude/skills/run-paynexus/SKILL.md Gotchas
+uvicorn api.main:app        # no --reload: it silently misses edits on Windows, so restart after changes
 
 # frontend
 cd frontend
