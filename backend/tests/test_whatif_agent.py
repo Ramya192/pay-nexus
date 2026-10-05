@@ -338,6 +338,7 @@ class TestNarrationGuard:
         text, calls, result = self._run(monkeypatch, scenario, ["It becomes ₹127,915."])
         assert "127,915" not in text
         assert "₹88,830 → ₹106,596" in text
+        assert "Key figures" not in text and "already computed" not in text  # model-steering text never shown
         assert len(result["scenario_llm_calls"]) == 3  # extraction + narration + one retry
 
     def test_vague_narration_without_the_before_and_after_is_retried(self, monkeypatch):

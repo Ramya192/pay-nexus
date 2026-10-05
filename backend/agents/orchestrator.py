@@ -163,26 +163,44 @@ def capability_gap_node(state: PayNexusState) -> dict:
 
 
 _LEAKED_INSTRUCTION = re.compile(r"Your answer must (?:state|name) these exact[^\n]*", re.IGNORECASE)
-# A closing sentence like "For spending insights, consider reviewing your spending tools." --
-# the payslip prompt forbids pointing at other topics, but the model sometimes rephrases one anyway.
-_CROSS_TOPIC_POINTER = re.compile(
-    r"(?:(?<=[.!?])\s+|^)(?:[^.!?\n]*\b(?:spending|budget|goals?|savings advisor|financial advisor)\b"
-    r"[^.!?\n]*\b(?:consult|review|refer|see|check|insights?|tools?|section|advisor)\b[^.!?\n]*|"
-    r"[^.!?\n]*\b(?:consult|review|refer to|see)\b[^.!?\n]*\b(?:spending|budget|goals?)\b[^.!?\n]*)[.!?]\s*$",
+# The agent prompts end with a conversation-history block; if the model echoes it, drop the header
+# and everything after it (the "Q:"/"A:" turns span several lines).
+_LEAKED_HISTORY = re.compile(r"\n*Recent conversation in this session \(for context.*", re.IGNORECASE | re.DOTALL)
+
+# A sentence that points at another agent's topic ("For spending, consult ...", "Spending analysis
+# needs transaction data ..."). The payslip prompt forbids these, but the model rephrases them
+# anyway, anywhere in the section. A sentence with a digit is kept: real figures are never cut.
+_OTHER_TOPIC_WORD = re.compile(r"\b(?:spending|budget|goals?|transactions?|savings advisor|financial advisor)\b", re.IGNORECASE)
+_POINTER_CUE = re.compile(
+    r"\b(?:consult|review|refer|see|check|insights?|tools?|section|advisor|analy[sz]\w*|upload|required|evaluate|"
+    r"compliance|data)\b",
     re.IGNORECASE,
 )
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+_FOLLOW_UP_HEAD = "\n\nYou can ask more like:"
+_UPLOAD_BULLET = re.compile(r"^•\s*(?:upload|add|provide|connect|link)\b", re.IGNORECASE)
+
+
+def _is_cross_topic_pointer(sentence: str) -> bool:
+    return (
+        not any(ch.isdigit() for ch in sentence)
+        and bool(_OTHER_TOPIC_WORD.search(sentence))
+        and bool(_POINTER_CUE.search(sentence))
+    )
 
 
 def _scrub_leaked_instructions(text: str) -> str:
-    """An instruction line meant only for the model ("Your answer must state these exact figures: ...")
-    occasionally gets echoed into the narration -- strip it so users never see it."""
-    return _LEAKED_INSTRUCTION.sub("", text).strip()
+    """Text meant only for the model -- an instruction line ("Your answer must state these exact
+    figures: ...") or the prompt's conversation-history block -- occasionally gets echoed into the
+    narration. Strip it so users never see it."""
+    return _LEAKED_HISTORY.sub("", _LEAKED_INSTRUCTION.sub("", text)).strip()
 
 
 def _strip_cross_topic_pointer(text: str) -> str:
-    """Drops a trailing "for spending, consult ..." style sentence from a section when other agents'
-    sections are in the same response and already cover that topic."""
-    stripped = _CROSS_TOPIC_POINTER.sub("", text.rstrip()).rstrip()
+    """Drops "for spending, consult ..." style sentences, wherever they sit in a section, when other
+    agents' sections are in the same response and already cover that topic."""
+    lines = [" ".join(s for s in _SENTENCE_SPLIT.split(line) if not _is_cross_topic_pointer(s)) for line in text.split("\n")]
+    stripped = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
     return stripped or text
 
 
@@ -190,9 +208,16 @@ _OTHER_TOPIC_RESPONSE_KEYS = ("spending_response", "goal_response", "budget_resp
 
 
 def _strip_cross_topic_pointer_in_explanation(formatted: str) -> str:
-    """Applies _strip_cross_topic_pointer to the prose part only, leaving the follow-up list intact."""
-    head, sep, tail = formatted.partition("\n\nYou can ask more like:")
-    return _strip_cross_topic_pointer(head) + sep + tail
+    """Applies _strip_cross_topic_pointer to the prose, and drops follow-up bullets that tell the user
+    to upload data for another topic, leaving the other follow-ups intact."""
+    head, sep, tail = formatted.partition(_FOLLOW_UP_HEAD)
+    head = _strip_cross_topic_pointer(head)
+    if not sep:
+        return head
+    bullets = [ln for ln in tail.split("\n") if not (_UPLOAD_BULLET.match(ln) and _OTHER_TOPIC_WORD.search(ln))]
+    if not any(ln.startswith("•") for ln in bullets):
+        return head
+    return head + sep + "\n".join(bullets)
 
 
 def _format_agent_response(raw: str) -> str:

@@ -99,7 +99,9 @@ lists which computed data tables are available this turn by key (e.g. "tax_scena
 chat UI; put the "tables" field's array keys to whichever are actually relevant to what was asked. \
 A "payslip_scenario" table's Net Pay row is the answer whenever the question asks what net pay/ \
 take-home WOULD BE under a hypothetical payslip change — quote that computed figure directly, \
-never estimate what a component change "should" do to net pay yourself.
+never estimate what a component change "should" do to net pay yourself. For a payslip scenario, \
+always state both the changed component's baseline and scenario figures AND the net pay baseline and \
+scenario figures in the explanation itself, not only in the table.
 
 Respond with a JSON object: {"explanation": string, "tables": array of table keys (see above), \
 "follow_up_suggestions": array of strings}."""
@@ -249,7 +251,15 @@ def _narration_problem(raw: str, user_prompt: str, required: list[str]) -> str |
 
 
 def _computed_lines(prompt_parts: list[str]) -> list[str]:
-    return [p for p in prompt_parts if p and not p.startswith(("Available data tables", "Question:"))]
+    """The computed scenario text shown verbatim when narration fails twice. Drops the lines and
+    labels that exist only to steer the model ("Key figures", "(already computed)")."""
+    lines = []
+    for part in prompt_parts:
+        if not part or part.startswith(("Available data tables", "Question:")):
+            continue
+        kept = [ln for ln in part.split("\n") if not ln.startswith("Key figures")]
+        lines.append(re.sub(r" \(already computed[^)]*\)", "", "\n".join(kept)))
+    return lines
 
 
 def _simulate_tax_scenario(

@@ -252,3 +252,36 @@ class TestLeakAndPointerScrubbing:
 
         text = "Your TDS is Rs 29,485. Your new regime tax is lower."
         assert _strip_cross_topic_pointer(text) == text
+
+    def test_leaked_conversation_history_block_is_removed(self):
+        from agents.orchestrator import _format_agent_response
+
+        leaked = (
+            "HRA goes from ₹20,000 to ₹22,000.\n\nRecent conversation in this session "
+            "(for context — resolve follow-ups against this):\nQ: What is TDS?\nA: Tax deducted at source.\n"
+            "Q: net pay?\nA: Your net pay is ₹85,000."
+        )
+        out = _format_agent_response(json.dumps({"explanation": leaked}))
+        assert out == "HRA goes from ₹20,000 to ₹22,000."
+
+    def test_mid_paragraph_spending_pointer_and_upload_bullet_stripped(self):
+        from agents.orchestrator import assembler_node
+
+        payslip = json.dumps(
+            {
+                "explanation": "The new regime saves you tax. For spending analysis, transaction data is required to "
+                "evaluate your budget compliance or spending patterns adequately. Your TDS is ₹29,485.",
+                "follow_up_suggestions": ["Upload spending data to analyze your outflows against the budget.", "What is my HRA exemption?"],
+            }
+        )
+        spending = json.dumps({"explanation": "Most spend is Rent.", "follow_up_suggestions": []})
+        out = assembler_node({"payslip_response": payslip, "spending_response": spending})["final_response"]
+        assert "transaction data is required" not in out and "Upload spending data" not in out
+        assert "The new regime saves you tax." in out and "Your TDS is ₹29,485." in out
+        assert "What is my HRA exemption?" in out
+
+    def test_sentence_with_a_figure_is_never_cut(self):
+        from agents.orchestrator import _strip_cross_topic_pointer
+
+        text = "Your budget-neutral switch saves ₹12,000 a year. Review the tax table below."
+        assert _strip_cross_topic_pointer(text) == text
