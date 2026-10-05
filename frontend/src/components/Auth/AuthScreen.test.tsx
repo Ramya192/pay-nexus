@@ -143,15 +143,29 @@ describe("AuthScreen", () => {
     }
   });
 
-  it("shows the register-specific error message when account creation fails", async () => {
+  it.each([
+    [{ response: { status: 409 } }, /already exists/],
+    [{ response: { status: 422, data: { detail: [{ loc: ["body", "email"], msg: "special-use domain" }] } } }, /email address isn't accepted/],
+    [{ response: { status: 422, data: { detail: [{ loc: ["body", "password"], msg: "too short" }] } } }, /at least 8 characters/],
+    [{ response: { status: 422, data: {} } }, /Could not create that account\./],
+    [{ response: { status: 400 } }, /Could not create that account\./],
+  ])("shows a register-specific error message when account creation fails (%#)", async (rejection, expected) => {
     const user = userEvent.setup();
-    vi.spyOn(authApi, "register").mockRejectedValue({ response: { status: 409 } });
+    vi.spyOn(authApi, "register").mockRejectedValue(rejection);
     render(<AuthScreen />);
     await user.click(screen.getByRole("button", { name: "Need an account? Register" }));
 
     await fillAndSubmit(user);
 
-    await waitFor(() => expect(screen.getByText("Could not create that account.")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(expected)).toBeInTheDocument());
+  });
+
+  it("a 409 on login is still the generic credentials message", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(authApi, "login").mockRejectedValue({ response: { status: 409 } });
+    render(<AuthScreen />);
+    await fillAndSubmit(user);
+    await waitFor(() => expect(screen.getByText("Incorrect email or password.")).toBeInTheDocument());
   });
 
   it("hydrates every store from decrypted server data after a successful login", async () => {

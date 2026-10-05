@@ -14,6 +14,21 @@ import { usePayslipHistoryStore, type SnapshotEntry } from "../../store/payslipH
 import { useSessionHistoryStore } from "../../store/sessionHistoryStore";
 import { useTransactionStore, type StatementEntry } from "../../store/transactionStore";
 
+// A failed registration is specific enough to say why: 409 is a taken email, and a 422 names the
+// rejected field in FastAPI's `detail[].loc` (the server also refuses reserved domains like .test,
+// which the browser's own email check lets through). Login keeps its one generic message.
+function registrationErrorMessage(err: unknown): string {
+  const response = (err as { response?: { status?: number; data?: { detail?: unknown } } })?.response;
+  if (response?.status === 409) return "An account with this email already exists — try logging in instead.";
+  if (response?.status === 422) {
+    const detail = Array.isArray(response.data?.detail) ? (response.data?.detail as { loc?: unknown[] }[]) : [];
+    const rejects = (field: string) => detail.some((d) => Array.isArray(d.loc) && d.loc.includes(field));
+    if (rejects("email")) return "That email address isn't accepted — use a real-looking address such as name@example.com.";
+    if (rejects("password")) return "Your password must be at least 8 characters.";
+  }
+  return "Could not create that account.";
+}
+
 export function AuthScreen() {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
@@ -174,7 +189,7 @@ export function AuthScreen() {
             ? "Something went wrong on our side — please try again."
             : mode === "login"
               ? "Incorrect email or password."
-              : "Could not create that account."
+              : registrationErrorMessage(err)
       );
     } finally {
       setLoading(false);
