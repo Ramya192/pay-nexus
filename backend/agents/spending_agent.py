@@ -40,6 +40,7 @@ from analytics.spending_trends import (
     category_period_trend_table,
     format_spending_summary_for_prompt,
     period_trend_table,
+    spending_by_category,
     spending_by_category_table,
 )
 from config import config
@@ -91,7 +92,7 @@ outside spending at all, positively or negatively.
 Address the user directly throughout, in second person ("you," "your") — never slip into \
 third-person ("her," "his," "their," "the user's") mid-answer.
 
-Keep "explanation" to a short narrative — don't restate every rupee figure in prose. A line below \
+Keep "explanation" to a short narrative — don't restate every rupee figure in prose — but never reduce it to one generic sentence. For a broad question ("where is my money going"), name the top categories with their rupee figures and shares of spend, then let the table carry the rest; when a net-savings trend or projection line is in the Spending summary, mention it too. A line below \
 lists which computed data tables are available this turn by key (e.g. "by_category", \
 "period_trend", "category_trend", "recurring", "subscriptions") and these render as an actual \
 table in the chat UI; put the "tables" field's array keys to whichever are actually relevant \
@@ -136,6 +137,18 @@ def spending_agent_node(state: PayNexusState) -> dict:
         "Spending summary (already computed — quote directly, do not recompute):\n"
         + format_spending_summary_for_prompt(transactions)
     ]
+
+    # The model tends to defer to the rendered table and write one generic sentence, so the
+    # top categories are handed over as a ready-made sentence it must include.
+    top = spending_by_category(transactions)[:3]
+    if top:
+        total = sum(c.total_spent for c in spending_by_category(transactions))
+        prompt_parts.append(
+            "For a broad 'where is my money going' question your answer must name the top categories "
+            "with these exact figures: "
+            + ", ".join(f"{c.category} ₹{c.total_spent:,.0f} ({c.total_spent / total:.0%} of spend)" for c in top)
+            + "."
+        )
 
     conversation_block = format_conversation_for_prompt(state.get("conversation") or [])
     if conversation_block:

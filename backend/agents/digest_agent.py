@@ -37,6 +37,7 @@ from analytics.spending_trends import (
     average_monthly_net_savings,
     format_spending_summary_for_prompt,
     spending_by_category_table,
+    transactions_in_period,
 )
 from budgeting.budgets import budget_vs_actual_table, format_budget_summary_for_prompt, latest_period
 from config import config
@@ -65,6 +66,14 @@ short key — these render as an actual table in the chat UI. Pick only the ones
 highlighting (rarely more than two — this is a recap, not a data dump) and list their keys in the \
 "tables" field; [] is a completely valid answer if the narrative alone covers it well.
 
+Accuracy rules: "this month" spending means ONLY the latest-period figures; never present the \
+all-periods history as this month's. If a goal has ₹0 saved / 0% progress, say so plainly and say \
+whether the savings pace would be enough — do not call it "on track" or "commendable progress". Do not \
+describe income as both "consistent" and "trending up" — state the actual change figure once. No \
+evaluative filler ("efficient financial management", "solid performance"); state facts only.
+Pick at most two tables, and never pick a table whose rows repeat what your narrative already says \
+figure for figure.
+
 Respond with a JSON object with exactly these keys: "explanation" (the recap itself, 2-4 sentences \
 unless there's genuinely a lot of ground to cover) and "tables" (an array of the table keys you're \
 choosing to show, per above)."""
@@ -82,17 +91,24 @@ def digest_agent_node(state: PayNexusState) -> dict:
     budgets = state.get("budgets") or {}
 
     available_tables: dict[str, dict] = {}
+    # "This month" figures must come from the latest period only; the
+    # all-periods totals are a different number and were being quoted as if
+    # they were this month's.
+    period = latest_period(transactions)
+    period_txns = transactions_in_period(transactions, period)
     prompt_parts = [
         "Payslip trends (already computed):\n" + format_trends_for_prompt(payslip_history),
-        "Spending summary (already computed):\n" + format_spending_summary_for_prompt(transactions),
+        f"Spending summary for the latest period, {period} (this is 'this month' — already computed):\n"
+        + format_spending_summary_for_prompt(period_txns)
+        + "\nAll-periods history on file (do NOT call this 'this month'):\n"
+        + format_spending_summary_for_prompt(transactions),
     ]
     if (t := trends_table(payslip_history)) is not None:
         available_tables["trends"] = t
-    if (t := spending_by_category_table(transactions)) is not None:
+    if (t := spending_by_category_table(period_txns)) is not None:
         available_tables["spending_by_category"] = t
 
     if budgets:
-        period = latest_period(transactions)
         prompt_parts.append(
             "Budget check (already computed):\n" + format_budget_summary_for_prompt(transactions, budgets, period)
         )

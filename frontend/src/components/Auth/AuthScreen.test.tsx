@@ -103,7 +103,7 @@ describe("AuthScreen", () => {
 
   it("shows a mode-specific error and never authenticates when the credentials are rejected", async () => {
     const user = userEvent.setup();
-    vi.spyOn(authApi, "login").mockRejectedValue(new Error("401"));
+    vi.spyOn(authApi, "login").mockRejectedValue({ response: { status: 401 } });
     render(<AuthScreen />);
 
     await fillAndSubmit(user);
@@ -112,9 +112,40 @@ describe("AuthScreen", () => {
     expect(useAuthStore.getState().token).toBeNull();
   });
 
+  it("shows a distinct rate-limit message for a 429, not the credentials message", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(authApi, "login").mockRejectedValue({ response: { status: 429 } });
+    render(<AuthScreen />);
+
+    await fillAndSubmit(user);
+
+    await waitFor(() => expect(screen.getByText(/Too many attempts/)).toBeInTheDocument());
+    expect(screen.queryByText("Incorrect email or password.")).not.toBeInTheDocument();
+  });
+
+  it("a 401 still shows the generic credentials message (no email enumeration)", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(authApi, "login").mockRejectedValue({ response: { status: 401 } });
+    render(<AuthScreen />);
+    await fillAndSubmit(user);
+    await waitFor(() => expect(screen.getByText("Incorrect email or password.")).toBeInTheDocument());
+  });
+
+  it("a 500 or a network failure on login is not reported as wrong credentials", async () => {
+    for (const rejection of [{ response: { status: 500 } }, new Error("Network Error")]) {
+      const user = userEvent.setup();
+      vi.spyOn(authApi, "login").mockRejectedValue(rejection);
+      const { unmount } = render(<AuthScreen />);
+      await fillAndSubmit(user);
+      await waitFor(() => expect(screen.getByText(/Something went wrong on our side/)).toBeInTheDocument());
+      expect(screen.queryByText("Incorrect email or password.")).not.toBeInTheDocument();
+      unmount();
+    }
+  });
+
   it("shows the register-specific error message when account creation fails", async () => {
     const user = userEvent.setup();
-    vi.spyOn(authApi, "register").mockRejectedValue(new Error("email taken"));
+    vi.spyOn(authApi, "register").mockRejectedValue({ response: { status: 409 } });
     render(<AuthScreen />);
     await user.click(screen.getByRole("button", { name: "Need an account? Register" }));
 

@@ -76,7 +76,10 @@ asking about this user's own remaining room, not the general rule. "Based on my 
 afford to invest more in 80C" needs both spending (what's actually being spent) and nudge (the \
 80C room itself). "Am I saving enough for my trip goal given my spending" needs both goal (the \
 target/progress math) and spending (the actual savings rate behind it). "Why am I over my food \
-budget" needs both budget (confirming the overage) and spending (explaining what drove it).
+budget" needs both budget (confirming the overage) and spending (explaining what drove it). \
+A message that joins two separate questions with "and" / "also" / a comma ("am I over budget, and \
+how is my goal progressing?") is TWO questions: classify each clause on its own and return every \
+agent either clause needs — never drop one clause because the other is longer or comes second.
 
 STRICT TEST for "unsupported" — apply it only if the message contains an explicit instruction \
 verb telling the system to change what's stored: delete, remove, clear, erase, edit, update, \
@@ -109,6 +112,9 @@ mentions stored data. Worked examples:
   against a REAL saved target; this is a hypothetical change to that target/spend)
 - "what if I saved ₹5,000 more a month for my Goa trip?" → whatif, not goal (goal reports real \
   progress; this asks what a hypothetical extra contribution would do)
+- "am I over budget, and how is my goal progressing?" → budget + goal (two clauses, two agents)
+- "what is TDS, and how much TDS did I pay in my latest payslip?" → regulatory + payslip
+- "where is my money going, and am I over budget?" → spending + budget
 - "how did I do this month?" → digest alone, not spending+budget+goal separately
 - "give me a summary of my finances" → digest alone
 - "how's my spending looking?" → spending, NOT digest — a single-area question, not a cross-cutting recap
@@ -311,6 +317,7 @@ def assembler_node(state: PayNexusState) -> dict:
         + (state.get("goal_llm_calls") or [])
         + (state.get("budget_llm_calls") or [])
         + (state.get("scenario_llm_calls") or [])
+        + (state.get("digest_llm_calls") or [])
     )
 
     return {

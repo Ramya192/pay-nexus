@@ -3,6 +3,8 @@ plain Python aggregation, no LLM, no network. Transactions here are plain
 dicts, matching how they travel through PayNexusState (agents/state.py).
 """
 
+import pytest
+
 from analytics.recurring import find_recurring_merchants, subscriptions_table
 from analytics.spending_trends import (
     net_savings_by_period,
@@ -10,6 +12,7 @@ from analytics.spending_trends import (
     period_span_months,
     project_net_savings,
     spending_by_category,
+    spending_excluded,
     spending_by_category_and_period,
     spending_by_period,
 )
@@ -363,6 +366,57 @@ class TestProjectNetSavings:
         assert projection.projected_values[0] < 10000  # continuing the decline past the last real value
         assert projection.historical_values == [20000, 15000, 10000]
 
+    def test_one_long_statement_spreads_across_its_real_months(self):
+        # A single 4-month statement must give 4 monthly points, not 1 --
+        # otherwise a 12-month bank statement next to 1-month bill payments
+        # gets fit as if they were equal-length periods.
+        transactions = [
+            {**t, "statement_period": "2026-05 to 2026-08"}
+            for month, expense in [("2026-05", 30000), ("2026-06", 35000), ("2026-07", 40000), ("2026-08", 45000)]
+            for t in self._income_and_expense(month, 50000, expense)
+        ]
+        projection = project_net_savings(transactions, periods_ahead=2)
+        assert projection is not None
+        assert projection.historical_periods == ["2026-05", "2026-06", "2026-07", "2026-08"]
+        assert projection.projected_periods == ["2026-09", "2026-10"]
+
+    def test_investments_count_as_saving_not_spending(self):
+        transactions = [
+            _txn("2026-07-01", "SALARY", 50000, "Income"),
+            _txn("2026-07-05", "RENT PAYMENT", -30000, "Rent"),
+            _txn("2026-07-06", "MUTUAL FUNDS", -10000, "Investments"),
+        ]
+        assert [c.category for c in spending_by_category(transactions)] == ["Rent"]
+        assert net_savings_by_period(transactions)[0].total_spent == 20000
+
+    def test_transfers_and_card_payments_leave_the_pie_but_are_reported(self):
+        transactions = [
+            _txn("2026-07-01", "SALARY", 50000, "Income"),
+            _txn("2026-07-05", "RENT PAYMENT", -30000, "Rent"),
+            _txn("2026-07-06", "IMPS-FAMILY", -400000, "Transfers"),
+            _txn("2026-07-07", "UPI-CRED", -9000, "Credit Card Payment"),
+            _txn("2026-07-08", "MUTUAL FUNDS", -10000, "Investments"),
+        ]
+        assert [c.category for c in spending_by_category(transactions)] == ["Rent"]
+        excluded = {c.category: c.total_spent for c in spending_excluded(transactions)}
+        assert excluded == {"Transfers": 400000, "Credit Card Payment": 9000, "Investments": 10000}
+        # Transfers and card payments still cost you cash; only investing is "saved".
+        assert net_savings_by_period(transactions)[0].total_spent == 50000 - 30000 - 400000 - 9000
+
+    def test_gap_months_keep_their_place_on_the_time_axis(self):
+        # Same -5000/month decline, but with a skipped month in the middle:
+        # the projection must still extend the same line, not flatten it.
+        transactions = (
+            self._income_and_expense("2026-01", 50000, 30000)  # 20000
+            + self._income_and_expense("2026-02", 50000, 35000)  # 15000
+            + self._income_and_expense("2026-04", 50000, 45000)  # 5000 (March missing)
+        )
+        projection = project_net_savings(transactions, periods_ahead=1)
+        assert projection is not None
+        assert projection.projected_periods == ["2026-05"]
+        assert projection.slope_per_period == pytest.approx(-5000)
+        assert projection.projected_values[0] == pytest.approx(0, abs=1)
+
     def test_chart_data_is_none_when_projection_is_none(self):
         transactions = self._income_and_expense("2026-06", 50000, 30000)
         assert net_savings_projection_chart_data(transactions) is None
@@ -383,3 +437,38 @@ class TestProjectNetSavings:
             "r_squared",
         }
         assert len(chart_data["historical_periods"]) == len(chart_data["historical_values"]) == 3
+
+
+def test_category_table_title_states_its_scope():
+    from analytics.spending_trends import spending_by_category_table
+
+    one = [{"date": "2026-07-01", "amount": -10, "category": "Groceries", "statement_period": "2026-07"}]
+    many = one + [{"date": "2026-08-01", "amount": -5, "category": "Groceries", "statement_period": "2026-08"}]
+    assert spending_by_category_table(one)["title"].endswith("2026-07")
+    assert "all 2 periods" in spending_by_category_table(many)["title"]
+
+
+class TestMerchantNormalization:
+    def test_same_merchant_in_different_statement_shapes_groups_together(self):
+        from analytics.recurring import find_recurring_merchants, normalize_merchant
+
+        descs = [
+            "UPI-NETFLIX COM-NETFLIXUPI.PAYU@HDFCBANK-HDFC0000001-1234",
+            "UPI-NETFLIX COM",
+            "UPI-SPOTIFY INDIA-SPOTIFY.BDSI@ICICI-ICIC0000",
+            "UPI-SPOTIFY INDIA LLP-SPOTIFY.BDSI@ICICI-ICIC0000",
+        ]
+        assert [normalize_merchant(d) for d in descs] == ["NETFLIX", "NETFLIX", "SPOTIFY", "SPOTIFY"]
+        txns = [
+            {"date": f"2026-0{i + 1}-05", "description": d, "amount": -199, "category": "Subscriptions"}
+            for i, d in enumerate(descs)
+        ]
+        merchants = find_recurring_merchants(txns, category="Subscriptions")
+        assert sorted((m.description, m.occurrences) for m in merchants) == [("NETFLIX", 2), ("SPOTIFY", 2)]
+
+    def test_distinct_merchants_stay_separate_and_unknown_shapes_survive(self):
+        from analytics.recurring import normalize_merchant
+
+        assert normalize_merchant("UPI-AMAZON PAY-X@YESBANK") != normalize_merchant("UPI-AMAZON PRIME-X@YESBANK")
+        assert normalize_merchant("NETFLIX.COM MUMBAI") == "NETFLIX.COM MUMBAI"
+        assert normalize_merchant("12345") == "12345"

@@ -52,7 +52,13 @@ from agents.state import PayNexusState
 from agents.tables import resolve_selected_tables
 from config import config
 from payslip_math import net_pay_table
-from payslip_trends import format_trends_for_prompt, resolve_effective_payslip, trends_table
+from payslip_trends import (
+    format_latest_change_for_prompt,
+    format_trends_for_prompt,
+    latest_change_table,
+    resolve_effective_payslip,
+    trends_table,
+)
 from tax_calculations import compute_all_gaps, gaps_table
 from tax_slabs import (
     FY_LABEL,
@@ -90,7 +96,9 @@ asks why it changed, quote that computed Net Pay figure — never re-derive or e
 yourself from the individual components; that is exactly the kind of money arithmetic this app \
 does in Python so a model's arithmetic mistake can't reach the user. "Why did my take-home drop \
 this month?" with 2+ months of history means comparing THAT computed Net Pay figure across the \
-relevant payslips, not just individual component trends.
+relevant payslips, not just individual component trends. In that answer always state BOTH months' \
+net pay figures and the difference (e.g. "₹68,600 in May to ₹62,600 in June, down ₹6,000"), then \
+name the component(s) that caused it — a direction word without the figures is not enough.
 
 If a "Declared old-regime deductions" figure is given below, it's already computed exactly \
 (80C + 80D + 24(b), capped correctly) — use that number directly for regime comparison rather \
@@ -138,7 +146,10 @@ part and say nothing else about those other topics — not even that you don't h
 not even a pointer to "the right tool." A separate agent already answers that part of the question, \
 in the SAME response, right alongside yours — you don't need to acknowledge it exists, flag that \
 you personally lack it, or redirect the user anywhere. Simplest fix: just don't bring up any topic \
-outside payslip data at all, positively or negatively.
+outside payslip data at all, positively or negatively. Never name or refer to any other agent (there is no "Financial Advisor" agent; do not write \
+"I defer to the GoalTracker/Savings Advisor") — just answer the payslip part. That includes closing pointers such as \
+"for spending, consult the additional insights in this session". Still state every payslip figure \
+the question calls for.
 
 Before writing "explanation," check: does a table/figure given to you above actually answer what \
 was asked (a tax liability number, a component amount, a deduction gap)? If YES — even if the \
@@ -160,7 +171,13 @@ Keep "explanation" to a short narrative — don't restate every rupee figure in 
 lists which computed data tables are available this turn by key (e.g. "components", "gaps", \
 "trends", "liability") and these render as an actual table in the chat UI; put the "tables" \
 field's array keys to whichever are actually relevant (usually one, sometimes two) instead of \
-repeating those numbers as prose. E.g. "why did my take-home drop" → ["components"]; "how much \
+repeating those numbers as prose. E.g. "why did my take-home drop" (or any "this month" / "last month" question) → \
+["monthly_change", "components"] when "monthly_change" is available: explain it from the \
+latest-vs-previous-month changes, NOT from the first-vs-last "trends" (those span the whole \
+history and say nothing about this month's move), and if take-home did not actually drop, say \
+so plainly. For the take-home-change question the explanation itself must still contain the two \
+net pay figures and the difference (the table supports it, it doesn't replace it); likewise a \
+regime recommendation's explanation must state the new-regime tax and the saving as ₹ figures. "how much \
 tax do I owe" or "recommend a regime" with a real number wanted → ["liability"] (add ["gaps"] too \
 if the deduction breakdown itself is also relevant, plus ["trends"] if multiple months matter).
 
@@ -199,6 +216,12 @@ def payslip_agent_node(state: PayNexusState) -> dict:
         prompt_parts.append("Payslip trends (already computed):\n" + format_trends_for_prompt(payslip_history))
         if (t := trends_table(payslip_history)) is not None:
             available_tables["trends"] = t
+        # Newest month vs the one before it -- the comparison "why did my
+        # take-home drop this month" needs (the trends above span the whole history).
+        if (change_text := format_latest_change_for_prompt(payslip_history)) is not None:
+            prompt_parts.append(change_text)
+            if (change_table := latest_change_table(payslip_history)) is not None:
+                available_tables["monthly_change"] = change_table
 
     financial_profile = state.get("financial_profile") or {}
     total_deductions = 0.0

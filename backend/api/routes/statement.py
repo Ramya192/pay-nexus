@@ -28,7 +28,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from analytics.spending_trends import net_savings_projection_chart_data, spending_by_category
+from analytics.spending_trends import net_savings_projection_chart_data, spending_by_category, spending_excluded
 from api.models.statement import (
     AnalyticsRequest,
     AnalyticsResponse,
@@ -37,6 +37,7 @@ from api.models.statement import (
     StatementOut,
     StatementParseRequest,
     StatementParseResponse,
+    StatementRenameRequest,
     StatementSaveRequest,
     StatementUpdateRequest,
     TransactionOut,
@@ -110,6 +111,9 @@ def statement_analytics(
         category_breakdown=[
             {"category": c.category, "total_spent": c.total_spent}
             for c in spending_by_category(body.transactions)
+        ],
+        excluded_from_spending=[
+            {"category": c.category, "total_spent": c.total_spent} for c in spending_excluded(body.transactions)
         ],
         savings_projection=net_savings_projection_chart_data(body.transactions),
     )
@@ -240,6 +244,51 @@ def update_statement(
 
     statement.ciphertext = base64.b64decode(body.ciphertext_b64)
     statement.iv = base64.b64decode(body.iv_b64)
+    db.commit()
+    db.refresh(statement)
+    return StatementOut(
+        id=statement.id,
+        source_account=statement.source_account,
+        period_label=statement.period_label,
+        created_at=statement.created_at.isoformat(),
+    )
+
+
+@router.patch("/{statement_id}/rename", response_model=StatementOut)
+def rename_statement(
+    statement_id: str,
+    body: StatementRenameRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> StatementOut:
+    """Renames a saved statement's account name and/or period label. Same
+    (user, source_account, period_label) uniqueness rule as /save: the new
+    pair must not collide with a DIFFERENT saved statement."""
+    statement = db.get(BankStatement, statement_id)
+    if not statement or statement.user_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Statement not found.")
+
+    new_account = (body.source_account if body.source_account is not None else statement.source_account).strip()
+    new_period = (body.period_label if body.period_label is not None else statement.period_label).strip()
+    if not new_account or not new_period:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Account name and period label can't be empty.")
+
+    clash = db.scalar(
+        select(BankStatement).where(
+            BankStatement.user_id == user.id,
+            BankStatement.source_account == new_account,
+            BankStatement.period_label == new_period,
+            BankStatement.id != statement.id,
+        )
+    )
+    if clash:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"A statement for {new_account}, {new_period} is already saved.",
+        )
+
+    statement.source_account = new_account
+    statement.period_label = new_period
     db.commit()
     db.refresh(statement)
     return StatementOut(

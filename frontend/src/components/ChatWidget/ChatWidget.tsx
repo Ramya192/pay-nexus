@@ -11,7 +11,7 @@ import { useChatWidgetUiStore } from "../../store/chatWidgetUiStore";
  * user's main way of asking a question invisible until they noticed the
  * button. Conversation state (chatStore) is independent of whether this
  * panel is mounted, so minimizing mid-answer doesn't lose or interrupt
- * anything in flight — ChatInterface's streaming callbacks write to the
+ * anything in flight (the panel is only hidden, never unmounted) — ChatInterface's streaming callbacks write to the
  * Zustand store directly, not to component state.
  *
  * Maximize toggles between the small floating panel and a near-full-screen
@@ -39,52 +39,61 @@ export function ChatWidget() {
     setMaximized(false);
   }
 
-  if (!open) {
-    return (
-      <button
-        onClick={() => setOpen(true)}
-        aria-label="Open chat"
-        className="fixed bottom-5 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-brand-600 text-white shadow-lg hover:bg-brand-700"
-      >
-        <MessageCircle className="h-6 w-6" aria-hidden="true" />
-      </button>
-    );
-  }
-
+  // The panel stays mounted while minimized (just display:none): ChatInterface keeps its
+  // in-flight turn, Stop controller and "sending" flag in component state, so unmounting it
+  // mid-answer made a reopened chat think nothing was running and drop typed questions.
   return (
-    <div
-      className={
-        maximized
-          ? "fixed inset-4 z-40 flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl sm:inset-8"
-          : "fixed bottom-5 right-5 z-40 flex h-[min(760px,85vh)] w-[min(520px,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl"
-      }
-    >
-      <div className="flex items-center justify-between border-b border-slate-200 bg-brand-600 px-4 py-3 text-white">
-        <div className="flex items-center gap-2">
-          <MessageCircle className="h-4 w-4" aria-hidden="true" />
-          <span className="text-sm font-semibold">PayNexus Assistant</span>
+    <>
+      {!open && (
+        <button
+          onClick={() => setOpen(true)}
+          aria-label="Open chat"
+          className="fixed bottom-5 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-brand-600 text-white shadow-lg hover:bg-brand-700"
+        >
+          <MessageCircle className="h-6 w-6" aria-hidden="true" />
+        </button>
+      )}
+      <div
+        className={
+          !open
+            ? "hidden"
+            : maximized
+              ? "fixed inset-4 z-40 flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl sm:inset-8"
+              : "fixed bottom-5 right-5 z-40 flex h-[min(760px,85vh)] w-[min(520px,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl"
+        }
+      >
+        <div className="flex items-center justify-between border-b border-slate-200 bg-brand-600 px-4 py-3 text-white">
+          <div className="flex items-center gap-2">
+            <MessageCircle className="h-4 w-4" aria-hidden="true" />
+            <span className="text-sm font-semibold">PayNexus Assistant</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setMaximized(!maximized)}
+              aria-label={maximized ? "Restore chat size" : "Maximize chat"}
+              title={maximized ? "Restore" : "Maximize"}
+              className="rounded p-1 hover:bg-white/15"
+            >
+              {maximized ? (
+                <Minimize2 className="h-4 w-4" aria-hidden="true" />
+              ) : (
+                <Maximize2 className="h-4 w-4" aria-hidden="true" />
+              )}
+            </button>
+            <button
+              onClick={handleMinimize}
+              aria-label="Minimize chat"
+              title="Minimize"
+              className="rounded p-1 hover:bg-white/15"
+            >
+              <Minus className="h-4 w-4" aria-hidden="true" />
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => setMaximized(!maximized)}
-            aria-label={maximized ? "Restore chat size" : "Maximize chat"}
-            title={maximized ? "Restore" : "Maximize"}
-            className="rounded p-1 hover:bg-white/15"
-          >
-            {maximized ? (
-              <Minimize2 className="h-4 w-4" aria-hidden="true" />
-            ) : (
-              <Maximize2 className="h-4 w-4" aria-hidden="true" />
-            )}
-          </button>
-          <button onClick={handleMinimize} aria-label="Minimize chat" title="Minimize" className="rounded p-1 hover:bg-white/15">
-            <Minus className="h-4 w-4" aria-hidden="true" />
-          </button>
+        <div className="min-h-0 flex-1">
+          <ChatInterface />
         </div>
       </div>
-      <div className="min-h-0 flex-1">
-        <ChatInterface />
-      </div>
-    </div>
+    </>
   );
 }

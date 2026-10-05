@@ -35,8 +35,10 @@ class TrendProjection:
     projected_values: list[float]  # one per period_ahead requested, in order
 
 
-def project_linear_trend(values: list[float], periods_ahead: int = 3) -> TrendProjection | None:
-    """`values` must already be sorted oldest -> newest. Returns None with
+def project_linear_trend(
+    values: list[float], periods_ahead: int = 3, positions: list[int] | None = None
+) -> TrendProjection | None:
+    """`values` must already be sorted oldest -> newest (and `positions`, if given, ascending). Returns None with
     fewer than MIN_POINTS_FOR_PROJECTION points -- not enough to fit a
     meaningful line, same "say so rather than inventing a direction"
     principle payslip_trends.py's compute_trends already uses for its own,
@@ -45,12 +47,17 @@ def project_linear_trend(values: list[float], periods_ahead: int = 3) -> TrendPr
     if len(values) < MIN_POINTS_FOR_PROJECTION:
         return None
 
-    X = np.arange(len(values)).reshape(-1, 1)
+    # `positions` (e.g. month ordinals) lets unevenly spaced points -- a
+    # missing month in the middle -- sit where they really are on the time
+    # axis instead of being treated as adjacent.
+    xs = positions if positions is not None else list(range(len(values)))
+    X = np.array(xs).reshape(-1, 1)
     y = np.array(values, dtype=float)
     model = LinearRegression()
     model.fit(X, y)
 
-    future_X = np.arange(len(values), len(values) + periods_ahead).reshape(-1, 1)
+    last = xs[-1]
+    future_X = np.arange(last + 1, last + 1 + periods_ahead).reshape(-1, 1)
     projected_values = model.predict(future_X).tolist()
 
     return TrendProjection(

@@ -15,7 +15,28 @@ categorization/rules.py — are a more precise, complementary slice.)
 
 from __future__ import annotations
 
+import re
+from collections import Counter
 from dataclasses import dataclass
+
+_RAIL_PREFIXES = ("UPI", "POS", "ECOM", "ACH", "NACH", "ECS", "SI")
+_NOISE_TOKENS = {"COM", "LLP", "LTD", "LIMITED", "PVT", "PRIVATE", "INC", "INDIA", "CO"}
+
+
+def normalize_merchant(description: str) -> str:
+    """A stable grouping key for one merchant across the different shapes the same charge
+    takes on a statement ("UPI-NETFLIX COM-NETFLIXUPI.PAYU@HDFCBANK-...", "UPI-NETFLIX COM"):
+    drop the payment-rail prefix, take the merchant segment (the first one that has letters
+    and isn't a UPI handle), then drop corporate-suffix noise and bare numbers. Falls back to
+    the cleaned-up description itself, so unrecognised shapes just keep their own group."""
+    segments = [seg.strip() for seg in re.split(r"[-/]", description.upper()) if seg.strip()]
+    if segments and segments[0] in _RAIL_PREFIXES:
+        segments = segments[1:]
+    merchant = next((seg for seg in segments if re.search(r"[A-Z]", seg) and "@" not in seg), None)
+    if merchant is None:
+        return description.strip().upper()
+    tokens = [t for t in merchant.split() if t not in _NOISE_TOKENS and not t.isdigit()]
+    return " ".join(tokens) or merchant
 
 
 @dataclass
@@ -43,13 +64,13 @@ def find_recurring_merchants(
     for t in transactions:
         if t.get("amount", 0) >= 0:
             continue
-        by_description.setdefault(t["description"], []).append(t)
+        by_description.setdefault(normalize_merchant(t["description"]), []).append(t)
 
     results = []
     for description, group in by_description.items():
         if len(group) < min_occurrences:
             continue
-        merchant_category = group[0].get("category") or "Uncategorized"
+        merchant_category = Counter(t.get("category") or "Uncategorized" for t in group).most_common(1)[0][0]
         if category is not None and merchant_category != category:
             continue
         dates = sorted(t["date"] for t in group)  # "YYYY-MM-DD" strings sort chronologically

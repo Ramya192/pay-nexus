@@ -274,3 +274,138 @@ class TestGoalScenario:
         result = whatif_agent_node(state)
         explanation = json.loads(result["scenario_response"])["explanation"].lower()
         assert "no" in explanation or "not" in explanation or "don't have" in explanation or "couldn't find" in explanation
+
+
+class TestTaxTableShape:
+    """Direct calls (no LLM). A regime-only question has no deduction change, so
+    the table must not carry a Scenario column that just repeats Baseline."""
+
+    _payslip = {"month": "2026-06", "basic": 100_000, "hra": 40_000, "specialAllowance": 20_000}
+
+    def test_regime_only_table_has_no_duplicate_scenario_column(self):
+        from agents.whatif_agent import _simulate_tax_scenario
+
+        scenario = {"regime_switch": True, "additional_80c": None, "additional_80d": None, "additional_24b": None}
+        text, table = _simulate_tax_scenario(scenario, self._payslip, [], {})
+        assert table["headers"] == ["", "Old Regime", "New Regime"]
+        assert table["rows"][-1][0] == "New regime vs old"
+        assert "exact ₹ figures" in text
+
+    def test_deduction_change_keeps_scenario_column(self):
+        from agents.whatif_agent import _simulate_tax_scenario
+
+        scenario = {"regime_switch": False, "additional_80c": 50_000, "additional_80d": None, "additional_24b": None}
+        _, table = _simulate_tax_scenario(scenario, self._payslip, [], {})
+        assert "Scenario (Old Regime)" in table["headers"]
+
+
+class TestNarrationGuard:
+    """The narration may only quote ₹ figures the Python side computed (or the user typed), and
+    when a change was floored at 0 it must cite the real applied change. Offline: both the
+    extraction and narration LLM calls are faked."""
+
+    _state = {
+        "user_query": "What if I got a 20% raise?",
+        "payslip_data": {"month": "2026-06", "basic": 88_830, "hra": 38_356, "pfEmployee": 10_660, "professionalTax": 200, "tds": 29_485},
+        "payslip_history": [],
+        "financial_profile": {},
+        "conversation": [],
+    }
+
+    def _run(self, monkeypatch, scenario, narrations):
+        calls = []
+
+        async def fake_complete(system_prompt, user_prompt, **kwargs):
+            calls.append(user_prompt)
+            return json.dumps({"explanation": narrations[min(len(calls), len(narrations)) - 1]}), _NARRATION_METRICS
+
+        monkeypatch.setattr("agents.whatif_agent.extract_scenario", _fake_extract({**_EMPTY_SCENARIO, **scenario}))
+        monkeypatch.setattr("agents.whatif_agent.agent_complete", fake_complete)
+        result = whatif_agent_node(self._state)
+        return json.loads(result["scenario_response"])["explanation"], calls, result
+
+    def test_narration_with_an_uncomputed_figure_is_retried(self, monkeypatch):
+        scenario = {"payslip_field": "basic", "payslip_delta_percent_of_basic": 20.0}
+        text, calls, _ = self._run(
+            monkeypatch, scenario,
+            ["Basic goes from ₹106,596 to ₹127,915.", "Basic goes from ₹88,830 to ₹106,596."],
+        )
+        assert len(calls) == 2 and "rejected" in calls[1]
+        assert "88,830" in text and "127,915" not in text
+
+    def test_two_bad_narrations_fall_back_to_the_computed_lines(self, monkeypatch):
+        scenario = {"payslip_field": "basic", "payslip_delta_percent_of_basic": 20.0}
+        text, calls, result = self._run(monkeypatch, scenario, ["It becomes ₹127,915."])
+        assert "127,915" not in text
+        assert "₹88,830 → ₹106,596" in text
+        assert len(result["scenario_llm_calls"]) == 3  # extraction + narration + one retry
+
+    def test_vague_narration_without_the_before_and_after_is_retried(self, monkeypatch):
+        scenario = {"payslip_field": "basic", "payslip_delta_percent_of_basic": 20.0}
+        text, calls, _ = self._run(
+            monkeypatch, scenario,
+            ["A raise would increase your take-home pay.", "Basic goes from ₹88,830 to ₹106,596."],
+        )
+        assert len(calls) == 2 and "left out the required figure" in calls[1]
+        assert "88,830" in text
+
+    def test_good_narration_is_not_retried(self, monkeypatch):
+        scenario = {"payslip_field": "basic", "payslip_delta_percent_of_basic": 20.0}
+        _, calls, _ = self._run(monkeypatch, scenario, ["Basic rises from ₹88,830 to ₹106,596."])
+        assert len(calls) == 1
+
+    def test_floored_change_must_cite_the_applied_amount(self, monkeypatch):
+        scenario = {"payslip_field": "tds", "payslip_delta_amount": -50_000}
+        text, calls, _ = self._run(
+            monkeypatch, scenario,
+            ["Your net pay would rise by ₹50,000.", "TDS can't go below ₹0, so the real change is ₹29,485."],
+        )
+        assert len(calls) == 2
+        assert "29,485" in text
+
+    def test_floor_note_is_in_the_prompt_and_only_when_clamped(self):
+        payslip = {"month": "2026-06", "basic": 88_830, "tds": 29_485}
+        text, _ = _simulate_payslip_scenario({**_EMPTY_SCENARIO, "payslip_field": "tds", "payslip_delta_amount": -50_000}, payslip, [], {})
+        assert "Floor applied" in text and "₹29,485" in text
+        text, _ = _simulate_payslip_scenario({**_EMPTY_SCENARIO, "payslip_field": "tds", "payslip_delta_amount": -5_000}, payslip, [], {})
+        assert "Floor applied" not in text
+
+
+class TestReconcilePayslipChange:
+    """The model sometimes returns "₹2,000 more" as an absolute new value."""
+
+    @staticmethod
+    def _scenario(**kw):
+        return {"payslip_field": "hra", "payslip_new_value": None, "payslip_delta_amount": None,
+                "payslip_delta_percent_of_basic": None, **kw}
+
+    @pytest.mark.parametrize(
+        "query,value,expected",
+        [
+            ("What if my HRA was ₹2,000 more?", 2000, 2000),
+            ("what if my TDS was 500 less", 500, -500),
+            ("what if I got 2k extra HRA", 2000, 2000),
+            ("what if I increase my HRA by ₹2,000", 2000, 2000),
+            ("what if I reduce my special allowance by Rs. 1,500", 1500, -1500),
+        ],
+    )
+    def test_relative_wording_becomes_signed_delta(self, query, value, expected):
+        from whatif_extraction import _reconcile_payslip_change
+
+        s = self._scenario(payslip_new_value=value)
+        _reconcile_payslip_change(query, s)
+        assert s["payslip_delta_amount"] == expected and s["payslip_new_value"] is None
+
+    def test_absolute_wording_untouched(self):
+        from whatif_extraction import _reconcile_payslip_change
+
+        s = self._scenario(payslip_field="basic", payslip_new_value=80000)
+        _reconcile_payslip_change("what if my basic was ₹80,000?", s)
+        assert s["payslip_new_value"] == 80000 and s["payslip_delta_amount"] is None
+
+    def test_amount_mismatch_untouched(self):
+        from whatif_extraction import _reconcile_payslip_change
+
+        s = self._scenario(payslip_new_value=50000)
+        _reconcile_payslip_change("what if my HRA was 50000 and I got 2000 more bonus", s)
+        assert s["payslip_new_value"] == 50000

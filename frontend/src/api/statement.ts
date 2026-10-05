@@ -164,6 +164,21 @@ export async function updateStatement(id: string, blob: EncryptedBlob): Promise<
   return data;
 }
 
+/** Renames a saved statement's account name and/or period label (the two
+ * plaintext fields); the encrypted transactions are untouched. Throws a 409
+ * (see isDuplicateStatementError) if the new pair collides with a different
+ * saved statement. */
+export async function renameStatement(
+  id: string,
+  changes: { sourceAccount?: string; periodLabel?: string }
+): Promise<StatementSaveResult> {
+  const { data } = await apiClient.patch<StatementSaveResult>(`/statement/${id}/rename`, {
+    source_account: changes.sourceAccount,
+    period_label: changes.periodLabel,
+  });
+  return data;
+}
+
 /** Deletes one saved statement — used by the statement list's per-row
  * delete button. Deliberately not callable from chat/agents, same
  * reasoning as api/payslip.ts's deleteSnapshot. */
@@ -202,6 +217,9 @@ export interface SavingsProjection {
 
 export interface AnalyticsResult {
   category_breakdown: CategoryBreakdownEntry[];
+  // Money out that the pie deliberately leaves out (Investments, Transfers,
+  // Credit Card Payment) — shown as a note under the pie, not hidden.
+  excluded_from_spending?: CategoryBreakdownEntry[];
   savings_projection: SavingsProjection | null;
 }
 

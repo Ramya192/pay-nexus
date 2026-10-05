@@ -1,6 +1,13 @@
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useState } from "react";
-import { deleteStatement, updateStatement, type ParsedTransaction } from "../../api/statement";
+import {
+  deleteStatement,
+  getErrorDetail,
+  isDuplicateStatementError,
+  renameStatement,
+  updateStatement,
+  type ParsedTransaction,
+} from "../../api/statement";
 import { encryptJSON } from "../../crypto/clientEncryption";
 import { useAuthStore } from "../../store/authStore";
 import { useTransactionStore, type StatementEntry } from "../../store/transactionStore";
@@ -24,6 +31,10 @@ import { TRANSACTION_CATEGORIES } from "../../utils/categories";
 export function StatementList() {
   const entries = useTransactionStore((s) => s.entries);
   const removeEntries = useTransactionStore((s) => s.removeEntries);
+  const renameEntry = useTransactionStore((s) => s.renameEntry);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [draftAccount, setDraftAccount] = useState("");
+  const [draftPeriod, setDraftPeriod] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -55,12 +66,81 @@ export function StatementList() {
     }
   }
 
+  function startRename(entry: StatementEntry) {
+    setError(null);
+    setRenamingId(entry.id);
+    setDraftAccount(entry.sourceAccount);
+    setDraftPeriod(entry.periodLabel);
+  }
+
+  async function handleRename(entry: StatementEntry) {
+    const sourceAccount = draftAccount.trim();
+    const periodLabel = draftPeriod.trim();
+    if (!sourceAccount || !periodLabel) {
+      setError("Account name and period label can't be empty.");
+      return;
+    }
+    if (sourceAccount === entry.sourceAccount && periodLabel === entry.periodLabel) {
+      setRenamingId(null);
+      return;
+    }
+    setError(null);
+    setBusyId(entry.id);
+    try {
+      const saved = await renameStatement(entry.id, { sourceAccount, periodLabel });
+      renameEntry(entry.id, saved.source_account, saved.period_label);
+      setRenamingId(null);
+    } catch (err) {
+      setError(
+        isDuplicateStatementError(err)
+          ? (getErrorDetail(err) ?? "A statement with that name and period already exists.")
+          : "Couldn't rename that statement — try again."
+      );
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   return (
     <div className="space-y-2">
       <ul className="max-h-72 space-y-1 overflow-y-auto text-xs">
         {sorted.map((entry) => (
           <li key={entry.id} className="rounded px-1 py-1 text-slate-600 hover:bg-slate-50">
-            <div className="flex items-center justify-between gap-2">
+            {renamingId === entry.id && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <input
+                  type="text"
+                  value={draftAccount}
+                  onChange={(e) => setDraftAccount(e.target.value)}
+                  aria-label="Account name"
+                  className="min-w-0 flex-1 rounded border border-slate-300 px-1.5 py-0.5 text-xs"
+                />
+                <input
+                  type="text"
+                  value={draftPeriod}
+                  onChange={(e) => setDraftPeriod(e.target.value)}
+                  aria-label="Period label"
+                  className="min-w-0 flex-1 rounded border border-slate-300 px-1.5 py-0.5 text-xs"
+                />
+                <button
+                  type="button"
+                  onClick={() => handleRename(entry)}
+                  disabled={busyId === entry.id}
+                  className="shrink-0 text-brand-700 hover:underline disabled:opacity-50"
+                >
+                  Save
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRenamingId(null)}
+                  disabled={busyId === entry.id}
+                  className="shrink-0 text-slate-400 hover:text-slate-600"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+            <div className={`flex items-center justify-between gap-2 ${renamingId === entry.id ? "hidden" : ""}`}>
               <button
                 type="button"
                 onClick={() => setExpandedId(expandedId === entry.id ? null : entry.id)}
@@ -76,6 +156,15 @@ export function StatementList() {
                   {entry.sourceAccount} — {entry.periodLabel}
                   <span className="ml-1 text-slate-400">({entry.transactions.length} transactions)</span>
                 </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => startRename(entry)}
+                disabled={busyId === entry.id}
+                className="shrink-0 text-slate-400 hover:text-brand-700 disabled:opacity-50"
+                title="Rename this saved statement"
+              >
+                Rename
               </button>
               <button
                 type="button"

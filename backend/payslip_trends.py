@@ -42,6 +42,16 @@ class FieldTrend:
     direction: str  # "up" | "down" | "flat"
 
 
+def chronological(snapshots: list[dict]) -> list[dict]:
+    """Oldest -> newest by each snapshot's "month" ("YYYY-MM", so string order
+    is chronological). The frontend normally sends them sorted, but a batch
+    uploaded in a different order (e.g. 2026 files before 2025 ones) arrives
+    in upload order until the page is reloaded -- and "first", "last" and
+    "this month" below all depend on order. Stable, so snapshots with no month
+    keep their relative position."""
+    return sorted(snapshots, key=lambda s: str(s.get("month") or ""))
+
+
 def _is_number(value) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
@@ -63,7 +73,7 @@ def _compute_net_pay_trend(snapshots: list[dict]) -> FieldTrend | None:
     basic but nothing else is a sparse/test-data edge case in practice, not
     the common real path, and still produces an honest (if partial)
     number rather than silently dropping the month from the trend."""
-    points = [(s.get("month", "?"), compute_net_pay(s)) for s in snapshots if _is_number(s.get("basic"))]
+    points = [(s.get("month", "?"), compute_net_pay(s)) for s in chronological(snapshots) if _is_number(s.get("basic"))]
     if len(points) < 2:
         return None
     first_month, first_value = points[0]
@@ -78,6 +88,7 @@ def compute_trends(snapshots: list[dict]) -> list[FieldTrend]:
     /payslip/snapshots orders by month ascending, so the client doesn't
     need to re-sort before calling anything downstream of this)."""
     trends = []
+    snapshots = chronological(snapshots)
     for field, label in _TREND_FIELDS:
         points = [(s.get("month", "?"), s[field]) for s in snapshots if _is_number(s.get(field))]
         if len(points) < 2:
@@ -98,7 +109,7 @@ def _bonus_summary(snapshots: list[dict]) -> str | None:
     """Bonus months, not a first-vs-last trend — see _TREND_FIELDS comment
     for why. Lists every month a bonus was actually paid, so the Nudge
     Agent can connect a mid-period bonus to, say, a same-month TDS jump."""
-    paid = [(s.get("month", "?"), s["bonus"]) for s in snapshots if _is_number(s.get("bonus")) and s["bonus"] > 0]
+    paid = [(s.get("month", "?"), s["bonus"]) for s in chronological(snapshots) if _is_number(s.get("bonus")) and s["bonus"] > 0]
     if not paid:
         return None
     total = sum(v for _, v in paid)
@@ -120,7 +131,7 @@ def resolve_effective_payslip(payslip_data: dict, payslip_history: list[dict]) -
     answered a given question. Returns (effective_payslip, used_fallback).
     """
     if not payslip_data and payslip_history:
-        return payslip_history[-1], True  # most recent — GET /payslip/snapshots orders ascending
+        return chronological(payslip_history)[-1], True  # most recent by month
     return payslip_data, False
 
 
@@ -170,6 +181,111 @@ def format_duplicates_for_prompt(snapshots: list[dict]) -> str:
         "user wants them removed, point them to the \"Remove duplicates\" button in the Payslip "
         "history tab, not offer to do it here."
     )
+
+
+_CHANGE_FIELDS = (
+    ("basic", "Basic"),
+    ("hra", "HRA"),
+    ("specialAllowance", "Special Allowance"),
+    ("bonus", "Bonus"),
+    ("pfEmployee", "PF — employee"),
+    ("professionalTax", "Professional Tax"),
+    ("tds", "TDS"),
+)
+
+
+@dataclass
+class MonthChange:
+    label: str
+    previous: float
+    latest: float
+
+    @property
+    def delta(self) -> float:
+        return self.latest - self.previous
+
+
+def compute_latest_change(snapshots: list[dict]) -> tuple[str, str, list[MonthChange]] | None:
+    """Newest saved month vs the one before it -- what "why did my take-home
+    drop this month" actually needs. (compute_trends compares the OLDEST month
+    on file with the newest, which says nothing about this month's move.)
+    Net pay is first, then each component whose two values are both present.
+    None with fewer than two snapshots."""
+    ordered = chronological(snapshots)
+    if len(ordered) < 2:
+        return None
+    prev, latest = ordered[-2], ordered[-1]
+    rows: list[MonthChange] = []
+    if _is_number(prev.get("basic")) and _is_number(latest.get("basic")):
+        rows.append(MonthChange("Net pay (take-home)", compute_net_pay(prev), compute_net_pay(latest)))
+    for field, label in _CHANGE_FIELDS:
+        # A component present in only one month counts as 0 in the other --
+        # otherwise a newly added line (e.g. a Special Allowance that appears
+        # in June) is silently dropped and the net-pay jump has no visible cause.
+        if _is_number(prev.get(field)) or _is_number(latest.get(field)):
+            rows.append(MonthChange(label, prev.get(field) if _is_number(prev.get(field)) else 0.0,
+                                    latest.get(field) if _is_number(latest.get(field)) else 0.0))
+    return str(prev.get("month", "?")), str(latest.get("month", "?")), rows
+
+
+def format_latest_change_for_prompt(snapshots: list[dict]) -> str | None:
+    result = compute_latest_change(snapshots)
+    if result is None:
+        return None
+    prev_month, latest_month, rows = result
+    lines = [
+        f"Latest month vs previous month ({prev_month} -> {latest_month}), already computed -- quote directly, "
+        "this is the comparison to use for 'this month' / 'last month' questions:"
+    ]
+    for r in rows:
+        if r.delta == 0:
+            lines.append(f"{r.label}: unchanged at ₹{r.latest:,.0f}")
+        else:
+            direction = "up" if r.delta > 0 else "down"
+            lines.append(
+                f"{r.label}: ₹{r.previous:,.0f} -> ₹{r.latest:,.0f} ({direction} ₹{abs(r.delta):,.0f})"
+            )
+    net = next((r for r in rows if r.label.startswith("Net pay")), None)
+    if net is not None and net.delta != 0:
+        word = "up" if net.delta > 0 else "down"
+        lines.append(
+            f"Your answer must state these exact net pay figures: ₹{net.previous:,.0f} in {prev_month} to "
+            f"₹{net.latest:,.0f} in {latest_month} ({word} ₹{abs(net.delta):,.0f})."
+        )
+    if net is not None and net.delta > 0:
+        lines.append(
+            "Take-home did NOT drop -- it rose. Name the component rows above that actually "
+            "changed as the cause."
+        )
+    latest_snap = chronological(snapshots)[-1]
+    sa, bonus = latest_snap.get("specialAllowance"), latest_snap.get("bonus")
+    if _is_number(sa) and _is_number(bonus) and sa > 0 and sa == bonus:
+        lines.append(
+            f"Data check: Special Allowance and Bonus are both exactly ₹{sa:,.0f} in {latest_month}, "
+            "and both are counted in gross pay. This may be one amount entered under both labels; "
+            "tell the user to verify it against their payslip."
+        )
+    return "\n".join(lines)
+
+
+def latest_change_table(snapshots: list[dict]) -> dict | None:
+    result = compute_latest_change(snapshots)
+    if result is None:
+        return None
+    prev_month, latest_month, rows = result
+    return {
+        "title": f"Latest month vs previous ({prev_month} to {latest_month})",
+        "headers": ["Component", prev_month, latest_month, "Change"],
+        "rows": [
+            [
+                r.label,
+                f"₹{r.previous:,.0f}",
+                f"₹{r.latest:,.0f}",
+                "→ no change" if r.delta == 0 else f"{'↑' if r.delta > 0 else '↓'} ₹{abs(r.delta):,.0f}",
+            ]
+            for r in rows
+        ],
+    }
 
 
 def format_trends_for_prompt(snapshots: list[dict]) -> str:

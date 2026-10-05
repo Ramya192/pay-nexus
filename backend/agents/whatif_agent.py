@@ -34,6 +34,7 @@ an honest, plain sentence, not a None-shaped silence).
 
 import asyncio
 import json
+import re
 
 from pydantic import BaseModel
 
@@ -167,11 +168,88 @@ def whatif_agent_node(state: PayNexusState) -> dict:
             agent="whatif_agent",
         )
     )
+    calls = [extraction_metrics, metrics]
+    required = _required_figures(scenario, payslip_data)
+    problem = _narration_problem(raw, user_prompt, required)
+    if problem:
+        # The narration quoted a figure that isn't in the computed scenario (or left out one
+        # it had to mention) -- ask once more, then fall back to the computed lines verbatim
+        # rather than show a number the Python side never produced.
+        retry_raw, retry_metrics = asyncio.run(
+            agent_complete(
+                _SYSTEM_PROMPT,
+                f"{user_prompt}\n\nYour previous answer was rejected: {problem} Use ONLY the figures above.",
+                model=config.WHATIF_AGENT_MODEL,
+                response_model=WhatIfAgentResponse,
+                agent="whatif_agent",
+            )
+        )
+        calls.append(retry_metrics)
+        raw = retry_raw
+        if _narration_problem(raw, user_prompt, required):
+            parsed = json.loads(raw)
+            parsed["explanation"] = "\n".join(_computed_lines(prompt_parts))
+            raw = json.dumps(parsed)
     return {
         "scenario_response": raw,
         "scenario_tables": resolve_selected_tables(raw, available_tables),
-        "scenario_llm_calls": [extraction_metrics, metrics],
+        "scenario_llm_calls": calls,
     }
+
+
+_RUPEE_RE = re.compile(r"₹\s?(\d[\d,]*(?:\.\d+)?)")
+
+
+def _figures(text: str) -> set[str]:
+    """₹ amounts in `text` as plain digit strings ("1,02,600" and "102,600" both -> "102600");
+    a trailing sentence period (e.g. "₹5,000.") isn't read as a decimal point."""
+    return {m.group(1).replace(",", "").rstrip(".") for m in _RUPEE_RE.finditer(text)}
+
+
+def _required_figures(scenario: dict, payslip_data: dict) -> list[str]:
+    """Figures a payslip what-if narration MUST contain: the changed field's baseline and scenario
+    values, plus the real (post-floor) change when it got clamped at 0 -- a narration quoting the
+    requested amount instead is the wrong answer."""
+    field = scenario.get("payslip_field")
+    if not field or not payslip_data:
+        return []
+    change = apply_field_change(
+        payslip_data,
+        field,
+        new_value=scenario["payslip_new_value"],
+        delta_amount=scenario["payslip_delta_amount"],
+        delta_percent_of_basic=scenario["payslip_delta_percent_of_basic"],
+    )
+    if change is None:
+        return []
+    # The sentence must carry the changed component's before and after (the table alone isn't
+    # enough -- a vague "your pay would rise" gave the user nothing to check), and, when the
+    # change was floored at 0, the amount actually applied.
+    required = [f"{change.baseline_value:.0f}", f"{change.scenario_value:.0f}"]
+    if change.clamped:
+        required.append(f"{abs(change.baseline_value - change.scenario_value):.0f}")
+    return required
+
+
+def _narration_problem(raw: str, user_prompt: str, required: list[str]) -> str | None:
+    """None if the narration only quotes ₹ figures that appear in the prompt (computed
+    scenario or the user's own question) and includes every required one."""
+    try:
+        explanation = json.loads(raw).get("explanation", "")
+    except (ValueError, AttributeError):
+        return None
+    quoted = _figures(explanation)
+    unknown = sorted(f for f in quoted if f not in _figures(user_prompt))
+    if unknown:
+        return "it quoted ₹" + ", ₹".join(unknown) + " which is not among the computed figures."
+    missing = [r for r in required if r not in quoted]
+    if missing:
+        return "it left out the required figure(s) ₹" + ", ₹".join(missing) + "."
+    return None
+
+
+def _computed_lines(prompt_parts: list[str]) -> list[str]:
+    return [p for p in prompt_parts if p and not p.startswith(("Available data tables", "Question:"))]
 
 
 def _simulate_tax_scenario(
@@ -223,16 +301,33 @@ def _simulate_tax_scenario(
             f"(₹{savings:,.0f} {'less' if savings >= 0 else 'more'} than baseline old-regime tax)."
         )
     if scenario["regime_switch"]:
-        lines.append(f"  Regime comparison at baseline deductions (already computed — state this conclusion, do not reverse it): {cheaper_regime_statement(baseline_old, new_result)}")
+        lines.append(
+            f"  Regime comparison at baseline deductions (already computed — state this conclusion, do not reverse it): "
+            f"{cheaper_regime_statement(baseline_old, new_result)} Quote the exact ₹ figures for both regimes and the "
+            "difference in your answer, not just 'significant savings'."
+        )
 
-    table = {
-        "title": "What-if: tax scenario",
-        "headers": ["", "Baseline (Old Regime)", "Scenario (Old Regime)", "New Regime"],
-        "rows": [
-            ["Deductions", f"₹{baseline_deductions:,.0f}", f"₹{scenario_deductions:,.0f}", "—"],
-            ["Total tax", f"₹{baseline_old.total_tax:,.0f}", f"₹{scenario_old.total_tax:,.0f}", f"₹{new_result.total_tax:,.0f}"],
-        ],
-    }
+    if delta:
+        table = {
+            "title": "What-if: tax scenario",
+            "headers": ["", "Baseline (Old Regime)", "Scenario (Old Regime)", "New Regime"],
+            "rows": [
+                ["Deductions", f"₹{baseline_deductions:,.0f}", f"₹{scenario_deductions:,.0f}", "—"],
+                ["Total tax", f"₹{baseline_old.total_tax:,.0f}", f"₹{scenario_old.total_tax:,.0f}", f"₹{new_result.total_tax:,.0f}"],
+            ],
+        }
+    else:
+        # No deduction change: the "Scenario" column would just repeat Baseline.
+        diff = baseline_old.total_tax - new_result.total_tax
+        table = {
+            "title": "What-if: tax scenario",
+            "headers": ["", "Old Regime", "New Regime"],
+            "rows": [
+                ["Deductions", f"₹{baseline_deductions:,.0f}", "—"],
+                ["Total tax", f"₹{baseline_old.total_tax:,.0f}", f"₹{new_result.total_tax:,.0f}"],
+                ["New regime vs old", "", f"{'−' if diff >= 0 else '+'}₹{abs(diff):,.0f}"],
+            ],
+        }
     return "\n".join(lines), table
 
 
@@ -344,7 +439,16 @@ def _simulate_payslip_scenario(
         f"Payslip scenario — {field_label(field)}: ₹{change.baseline_value:,.0f} → ₹{change.scenario_value:,.0f}.",
         f"Net pay (already computed): ₹{baseline_net:,.0f} (baseline) → ₹{scenario_net:,.0f} (scenario) — "
         f"₹{abs(net_delta):,.0f} {direction} per month.",
+        f"Your answer must state these exact figures: {field_label(field)} ₹{change.baseline_value:,.0f} → "
+        f"₹{change.scenario_value:,.0f}, and net pay ₹{baseline_net:,.0f} → ₹{scenario_net:,.0f}.",
     ]
+    if change.clamped:
+        applied = abs(change.baseline_value - change.scenario_value)
+        lines.append(
+            f"Floor applied: the requested change would take {field_label(field)} below ₹0, so it floors "
+            f"at ₹0 and the change actually applied is ₹{applied:,.0f}, not the requested amount. Say so "
+            f"explicitly and quote ₹{applied:,.0f} as the real change."
+        )
     table_rows = [
         [field_label(field), f"₹{change.baseline_value:,.0f}", f"₹{change.scenario_value:,.0f}"],
         ["Net pay (computed)", f"₹{baseline_net:,.0f}", f"₹{scenario_net:,.0f}"],

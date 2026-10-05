@@ -214,8 +214,13 @@ def regulatory_agent_node(state: PayNexusState) -> dict:
 
     cached_answer = _cached_answer_if_strong_match(query, results)
     if cached_answer is not None:
+        # The first answer carried the "found via a live web search" banner; on replay the
+        # answer is genuinely local now, so don't repeat that banner -- but don't silently
+        # drop its provenance either: say it came from an earlier saved government-source search.
         return {
-            "regulatory_response": cached_answer,
+            "regulatory_response": (
+                "📌 Saved from an earlier live web search of Indian government sources:\n\n" + cached_answer
+            ),
             "regulatory_tables": [_sources_table(results)],
         }
 

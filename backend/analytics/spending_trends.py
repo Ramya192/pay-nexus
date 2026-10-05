@@ -95,12 +95,50 @@ def _period_of(transaction: dict) -> str:
     return transaction.get("statement_period") or transaction["date"][:7]
 
 
+# Money moved into investments (mutual fund SIPs etc.) is saving, not
+# spending: left out of every spending figure, and not deducted from net
+# savings either (the money is still yours, just invested).
+_SAVING_CATEGORIES = {"Investments"}
+
+# Paying a credit card bill from the bank account isn't a purchase: the
+# itemized purchases come from that card's own statement (and the synthetic
+# bill-payment row already has counts_toward_category_spend False), so the
+# bank-side payment would double count. Still a real cash outflow, so it DOES
+# reduce net savings.
+#
+# "Transfers" (money to/from people or your own accounts -- house payments,
+# family, moving money between accounts) isn't consumption either, and one
+# large transfer would otherwise swamp every real spending category. It still
+# reduces net savings, and spending_excluded() reports the total so the UI can
+# show what was left out instead of hiding it.
+_NON_SPENDING_CATEGORIES = {"Credit Card Payment", "Transfers"}
+
+
+def _is_saving(transaction: dict) -> bool:
+    return transaction.get("category") in _SAVING_CATEGORIES
+
+
 def _expenses(transactions: list[dict]) -> list[dict]:
     return [
         t
         for t in transactions
         if t.get("amount", 0) < 0 and t.get("counts_toward_category_spend", True)
+        and not _is_saving(t)
+        and t.get("category") not in _NON_SPENDING_CATEGORIES
     ]
+
+
+def spending_excluded(transactions: list[dict]) -> list[CategoryTotal]:
+    """Money that went out but is deliberately NOT in spending_by_category
+    (saving, transfers, credit-card bill payments), per category, largest
+    first -- so the UI can say what the pie leaves out."""
+    left_out = _SAVING_CATEGORIES | _NON_SPENDING_CATEGORIES
+    totals: dict[str, float] = {}
+    for t in transactions:
+        category = t.get("category")
+        if t.get("amount", 0) < 0 and t.get("counts_toward_category_spend", True) and category in left_out:
+            totals[category] = totals.get(category, 0.0) + (-t["amount"])
+    return sorted((CategoryTotal(c, v) for c, v in totals.items()), key=lambda c: c.total_spent, reverse=True)
 
 
 def spending_by_category(transactions: list[dict]) -> list[CategoryTotal]:
@@ -114,6 +152,11 @@ def spending_by_category(transactions: list[dict]) -> list[CategoryTotal]:
         key=lambda c: c.total_spent,
         reverse=True,
     )
+
+
+def transactions_in_period(transactions: list[dict], period: str | None) -> list[dict]:
+    """Only the transactions saved under one statement period."""
+    return [t for t in transactions if period is not None and _period_of(t) == period]
 
 
 def spending_by_period(transactions: list[dict]) -> list[PeriodTotal]:
@@ -143,7 +186,7 @@ def net_savings_by_period(transactions: list[dict]) -> list[PeriodTotal]:
     leaving the bank."""
     totals: dict[str, float] = {}
     for t in transactions:
-        if not t.get("counts_toward_net_savings", True):
+        if not t.get("counts_toward_net_savings", True) or _is_saving(t):
             continue
         period = _period_of(t)
         totals[period] = totals.get(period, 0.0) + t.get("amount", 0)
@@ -265,25 +308,56 @@ class SpendProjection:
     projected_values: list[float]
 
 
+def _month_ordinal(month: str) -> int:
+    year, mon = month.split("-")
+    return int(year) * 12 + int(mon) - 1
+
+
+def _month_label(ordinal: int) -> str:
+    return f"{ordinal // 12:04d}-{ordinal % 12 + 1:02d}"
+
+
+def net_savings_by_month(transactions: list[dict]) -> list[PeriodTotal]:
+    """Like net_savings_by_period, but bucketed by each transaction's own
+    calendar month ("YYYY-MM") instead of its statement's period label.
+    Needed for the trend projection: statement labels can cover very
+    different spans (a 12-month annual statement next to a single bill
+    payment), and fitting a line through buckets of unequal length is
+    meaningless. Net savings is a cash-flow figure, so the transaction's
+    real date is the right bucket -- the billing-cycle reason for grouping by
+    statement period doesn't apply here (itemized card purchases are already
+    excluded via counts_toward_net_savings)."""
+    totals: dict[str, float] = {}
+    for t in transactions:
+        if not t.get("counts_toward_net_savings", True) or not t.get("date") or _is_saving(t):
+            continue
+        month = t["date"][:7]
+        totals[month] = totals.get(month, 0.0) + t.get("amount", 0)
+    return sorted((PeriodTotal(month, total) for month, total in totals.items()), key=lambda p: p.period)
+
+
 def project_net_savings(transactions: list[dict], periods_ahead: int = 3) -> SpendProjection | None:
-    """A real linear-regression fit over net-savings-by-period, projected
-    forward — genuinely different from goal_progress.py's "required
-    ₹X/month to hit a target" math (that's a target-driven calculation with
-    no history involved at all; this is a history-driven fit with no target
-    involved). None with fewer than trend_projection.MIN_POINTS_FOR_PROJECTION
-    periods on file — same "don't project from too little data" principle
-    as every other trend function in this module.
+    """A real linear-regression fit over net-savings-by-calendar-month,
+    projected forward -- genuinely different from goal_progress.py's
+    "required ₹X/month to hit a target" math (that's a target-driven
+    calculation with no history involved at all; this is a history-driven fit
+    with no target involved). None with fewer than
+    trend_projection.MIN_POINTS_FOR_PROJECTION months on file -- same "don't
+    project from too little data" principle as every other trend function in
+    this module. Months with no data at all are left out of the fit but keep
+    their true position on the time axis.
     """
-    periods = net_savings_by_period(transactions)
-    projection = project_linear_trend([p.total_spent for p in periods], periods_ahead)
+    months = net_savings_by_month(transactions)
+    positions = [_month_ordinal(m.period) for m in months]
+    projection = project_linear_trend([m.total_spent for m in months], periods_ahead, positions)
     if projection is None:
         return None
     return SpendProjection(
-        historical_periods=[p.period for p in periods],
-        historical_values=[p.total_spent for p in periods],
+        historical_periods=[m.period for m in months],
+        historical_values=[m.total_spent for m in months],
         slope_per_period=projection.slope_per_period,
         r_squared=projection.r_squared,
-        projected_periods=[f"+{i}" for i in range(1, periods_ahead + 1)],
+        projected_periods=[_month_label(positions[-1] + i) for i in range(1, periods_ahead + 1)],
         projected_values=projection.projected_values,
     )
 
@@ -348,8 +422,12 @@ def spending_by_category_table(transactions: list[dict]) -> dict | None:
     by_category = spending_by_category(transactions)
     if not by_category:
         return None
+    periods = {_period_of(t) for t in _expenses(transactions)}
+    # Say what the totals span, so an all-periods table can't be mistaken for
+    # a single month's (or the budget table's) figures.
+    scope = f" — all {len(periods)} periods on file" if len(periods) > 1 else f" — {next(iter(periods))}" if periods else ""
     return {
-        "title": "Spending by category",
+        "title": f"Spending by category{scope}",
         "headers": ["Category", "Total spent"],
         "rows": [[c.category, f"₹{c.total_spent:,.0f}"] for c in by_category],
     }

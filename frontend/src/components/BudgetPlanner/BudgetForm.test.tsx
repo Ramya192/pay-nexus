@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { BudgetForm } from "./BudgetForm";
 import { useBudgetStore } from "../../store/budgetStore";
 import { useAuthStore } from "../../store/authStore";
+import { usePayslipHistoryStore } from "../../store/payslipHistoryStore";
 import { usePayslipStore } from "../../store/payslipStore";
 import * as budgetApi from "../../api/budget";
 import * as encryption from "../../crypto/clientEncryption";
@@ -16,6 +17,7 @@ beforeEach(() => {
   useBudgetStore.getState().clear();
   useAuthStore.getState().logout();
   usePayslipStore.getState().clear();
+  usePayslipHistoryStore.getState().clear();
 });
 
 afterEach(() => {
@@ -51,6 +53,52 @@ describe("BudgetForm", () => {
     render(<BudgetForm />);
 
     await waitFor(() => expect(suggested).toHaveBeenCalledWith(60_000));
+  });
+
+  it("with no active payslip, derives the income from the newest saved payslip", async () => {
+    const suggested = vi
+      .spyOn(budgetApi, "fetchSuggestedBudget")
+      .mockResolvedValue({ salary_bracket: "Below 30k", budgets: {} });
+    usePayslipHistoryStore.getState().setEntries([
+      { id: "1", createdAt: "x", data: { month: "2026-05", basic: 90_000 } },
+      { id: "2", createdAt: "x", data: { month: "2026-06", basic: 15_000, hra: 6_000, specialAllowance: 4_000 } },
+    ]);
+    render(<BudgetForm />);
+
+    await waitFor(() => expect(suggested).toHaveBeenCalledWith(25_000));
+  });
+
+  it("re-fetches the suggestion when payslip history hydrates after mount", async () => {
+    const suggested = vi
+      .spyOn(budgetApi, "fetchSuggestedBudget")
+      .mockResolvedValue({ salary_bracket: "Below 30k", budgets: {} });
+    render(<BudgetForm />);
+    await waitFor(() => expect(suggested).toHaveBeenCalledWith(undefined));
+
+    act(() => {
+      usePayslipHistoryStore.getState().setEntries([
+        { id: "1", createdAt: "x", data: { month: "2026-06", basic: 15_000, hra: 6_000, specialAllowance: 4_000 } },
+      ]);
+    });
+    await waitFor(() => expect(suggested).toHaveBeenLastCalledWith(25_000));
+  });
+
+  it("does not overwrite values the user already typed when income arrives late", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(budgetApi, "fetchSuggestedBudget").mockResolvedValue({
+      salary_bracket: "Below 30k",
+      budgets: { Rent: 7_200 },
+    });
+    render(<BudgetForm />);
+    await waitFor(() => expect(screen.getByLabelText(/^Rent/)).toHaveValue(7_200));
+    await user.clear(screen.getByLabelText(/^Rent/));
+    await user.type(screen.getByLabelText(/^Rent/), "9000");
+
+    act(() => {
+      usePayslipHistoryStore.getState().setEntries([{ id: "1", createdAt: "x", data: { month: "2026-06", basic: 90_000 } }]);
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.getByLabelText(/^Rent/)).toHaveValue(9_000);
   });
 
   it("falls back to a blank, still-usable form if the suggestion fetch fails", async () => {

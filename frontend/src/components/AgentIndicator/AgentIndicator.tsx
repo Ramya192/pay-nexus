@@ -1,4 +1,4 @@
-import { FileText, Info, Lightbulb, Scale, type LucideIcon } from "lucide-react";
+import { BarChart3, FileText, Info, Lightbulb, PiggyBank, Scale, Sparkles, Target, Wallet, type LucideIcon } from "lucide-react";
 
 const AGENT_META: Record<string, { icon: LucideIcon; label: string }> = {
   payslip_agent: { icon: FileText, label: "Payslip Agent reasoning…" },
@@ -7,11 +7,26 @@ const AGENT_META: Record<string, { icon: LucideIcon; label: string }> = {
   // only the display string changes; "Savings Advisor" reads clearer than
   // "Nudge Agent" for someone with no context on the internal agent split.
   nudge_agent: { icon: Lightbulb, label: "Savings Advisor reasoning…" },
+  spending_agent: { icon: Wallet, label: "SpendingAnalyser Agent reasoning…" },
+  budget_agent: { icon: PiggyBank, label: "BudgetPlanner Agent reasoning…" },
+  goal_agent: { icon: Target, label: "GoalTracker Agent reasoning…" },
+  whatif_agent: { icon: Sparkles, label: "Foresight Agent reasoning…" },
+  digest_agent: { icon: BarChart3, label: "Monthly Digest reasoning…" },
   // Not a reasoning agent — just recognizing the request is a data-management
   // action (delete/edit/manage) none of the three above can perform. See
   // backend/agents/orchestrator.py's capability_gap_node.
   capability_gap_node: { icon: Info, label: "Checking what's possible from chat…" },
 };
+
+/** Fallback for an agent id missing from AGENT_META: "foo_bar_agent" -> "Foo Bar". */
+export function friendlyAgentName(agent: string): string {
+  return agent
+    .replace(/_agent$|_node$/, "")
+    .split("_")
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
 
 /** Driven by real `agent_active` SSE events (api/chat.ts), not a timer — see §10. */
 export function AgentIndicator({ agents }: { agents: string[] }) {
@@ -26,7 +41,7 @@ export function AgentIndicator({ agents }: { agents: string[] }) {
           <div key={agent} className="flex items-center gap-2 text-xs text-slate-500">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-brand-500" />
             <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            {meta?.label ?? `${agent} reasoning…`}
+            {meta?.label ?? `${friendlyAgentName(agent)} reasoning…`}
           </div>
         );
       })}

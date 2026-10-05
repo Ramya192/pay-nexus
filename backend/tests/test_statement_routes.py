@@ -203,6 +203,53 @@ class TestStatementSaveListDelete:
     def test_delete_nonexistent_statement_404(self, client, auth_headers):
         assert client.delete("/statement/not-a-real-id", headers=auth_headers).status_code == 404
 
+    def _save(self, client, auth_headers, account, period, label):
+        return client.post(
+            "/statement/save",
+            json={"source_account": account, "period_label": period, "content_hash": _fake_hash(label), **_fake_blob("[]")},
+            headers=auth_headers,
+        ).json()["id"]
+
+    def test_rename_changes_account_and_period(self, client, auth_headers):
+        statement_id = self._save(client, auth_headers, "HDFC Checking", "2026-07", "jul")
+        response = client.patch(
+            f"/statement/{statement_id}/rename",
+            json={"source_account": "HDFC Salary", "period_label": "July 2026"},
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+        assert response.json()["source_account"] == "HDFC Salary"
+        row = client.get("/statement/list", headers=auth_headers).json()[0]
+        assert (row["source_account"], row["period_label"]) == ("HDFC Salary", "July 2026")
+
+    def test_rename_into_an_existing_pair_409(self, client, auth_headers):
+        self._save(client, auth_headers, "HDFC Checking", "2026-07", "jul")
+        other_id = self._save(client, auth_headers, "HDFC Checking", "2026-08", "aug")
+        response = client.patch(
+            f"/statement/{other_id}/rename", json={"period_label": "2026-07"}, headers=auth_headers
+        )
+        assert response.status_code == 409
+
+    def test_rename_to_its_own_current_name_is_fine(self, client, auth_headers):
+        statement_id = self._save(client, auth_headers, "HDFC Checking", "2026-07", "jul")
+        response = client.patch(
+            f"/statement/{statement_id}/rename", json={"source_account": "HDFC Checking"}, headers=auth_headers
+        )
+        assert response.status_code == 200
+
+    def test_rename_blank_400_and_unknown_404(self, client, auth_headers):
+        statement_id = self._save(client, auth_headers, "HDFC Checking", "2026-07", "jul")
+        assert (
+            client.patch(
+                f"/statement/{statement_id}/rename", json={"source_account": "  "}, headers=auth_headers
+            ).status_code
+            == 400
+        )
+        assert (
+            client.patch("/statement/nope/rename", json={"source_account": "X"}, headers=auth_headers).status_code
+            == 404
+        )
+
 
 class TestStatementContentHashDuplicate:
     """The gap found in manual testing: the same real statement re-saved

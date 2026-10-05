@@ -21,20 +21,29 @@ interface PayslipHistoryState {
   clear: () => void;
 }
 
+// Oldest -> newest by month ("YYYY-MM" sorts chronologically). Entries added
+// during a session (batch upload) arrive in upload order, not month order, but
+// /chat's trends and "latest payslip" logic assume chronological.
+function chronologicalData(entries: SnapshotEntry[]): Record<string, unknown>[] {
+  return [...entries]
+    .sort((a, b) => String(a.data.month ?? "").localeCompare(String(b.data.month ?? "")))
+    .map((e) => e.data);
+}
+
 export const usePayslipHistoryStore = create<PayslipHistoryState>((set) => ({
   entries: [],
   snapshots: [],
-  setEntries: (entries) => set({ entries, snapshots: entries.map((e) => e.data) }),
+  setEntries: (entries) => set({ entries, snapshots: chronologicalData(entries) }),
   addEntry: (entry) =>
     set((s) => {
       const entries = [...s.entries, entry];
-      return { entries, snapshots: entries.map((e) => e.data) };
+      return { entries, snapshots: chronologicalData(entries) };
     }),
   removeEntries: (ids) =>
     set((s) => {
       const idSet = new Set(ids);
       const entries = s.entries.filter((e) => !idSet.has(e.id));
-      return { entries, snapshots: entries.map((e) => e.data) };
+      return { entries, snapshots: chronologicalData(entries) };
     }),
   clear: () => set({ entries: [], snapshots: [] }),
 }));

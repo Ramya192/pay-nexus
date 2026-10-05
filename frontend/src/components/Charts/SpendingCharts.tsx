@@ -74,7 +74,7 @@ export function SpendingCharts() {
 
   return (
     <div className="grid gap-6 md:grid-cols-2">
-      <CategoryPieChart data={analytics.category_breakdown} />
+      <CategoryPieChart data={analytics.category_breakdown} excluded={analytics.excluded_from_spending ?? []} />
       <SavingsTrendChart data={analytics.savings_projection} />
     </div>
   );
@@ -95,12 +95,28 @@ const PIE_COLORS = [
   "var(--color-brand-800)",
 ];
 
-function CategoryPieChart({ data }: { data: AnalyticsResult["category_breakdown"] }) {
+function ExcludedNote({ excluded }: { excluded: AnalyticsResult["category_breakdown"] }) {
+  if (excluded.length === 0) return null;
+  return (
+    <p className="mt-2 text-[11px] text-slate-400">
+      Not counted as spending: {excluded.map((e) => `${e.category} ${formatRupees(e.total_spent)}`).join(" · ")}
+    </p>
+  );
+}
+
+function CategoryPieChart({
+  data,
+  excluded,
+}: {
+  data: AnalyticsResult["category_breakdown"];
+  excluded: AnalyticsResult["category_breakdown"];
+}) {
   if (data.length === 0) {
     return (
       <div className="rounded-lg border border-slate-200 p-4">
         <h3 className="mb-2 text-sm font-semibold text-slate-700">Spending by category</h3>
         <p className="text-xs text-slate-400">No expense transactions on file yet.</p>
+        <ExcludedNote excluded={excluded} />
       </div>
     );
   }
@@ -121,7 +137,8 @@ function CategoryPieChart({ data }: { data: AnalyticsResult["category_breakdown"
             // half-width grid column, especially with several small slices
             // bunched together. Category names live in the Legend below
             // instead, which wraps properly rather than clipping.
-            label={(props: { percent?: number }) => `${((props.percent ?? 0) * 100).toFixed(0)}%`}
+            // Slices under 2% get no on-slice label (they overlap their neighbours); the legend/tooltip still name them.
+            label={(props: { percent?: number }) => ((props.percent ?? 0) < 0.02 ? "" : `${((props.percent ?? 0) * 100).toFixed(0)}%`)}
           >
             {data.map((entry, i) => (
               <Cell key={entry.category} fill={PIE_COLORS[i % PIE_COLORS.length]} />
@@ -135,6 +152,7 @@ function CategoryPieChart({ data }: { data: AnalyticsResult["category_breakdown"
           />
         </PieChart>
       </ResponsiveContainer>
+      <ExcludedNote excluded={excluded} />
     </div>
   );
 }

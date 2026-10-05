@@ -126,3 +126,48 @@ class TestAverageMonthlyNetSavings:
             {"date": "2026-06-05", "amount": -50000, "statement_period": "2026-06"},
         ]
         assert average_monthly_net_savings(transactions) == 25000
+
+
+class TestPaceVerdict:
+    _goal = {"name": "Trip", "category": "Travel", "targetAmount": 100_000, "savedAmount": 0, "targetDate": "2027-03-04"}
+
+    def test_enough_pace_says_no_adjustment_needed(self):
+        from datetime import date
+
+        from analytics.goal_progress import format_goals_for_prompt
+
+        text = format_goals_for_prompt([self._goal], 50_000, today=date(2026, 10, 4))
+        assert "is ENOUGH" in text and "no adjustment is required" in text
+
+    def test_short_pace_states_the_shortfall(self):
+        from datetime import date
+
+        from analytics.goal_progress import format_goals_for_prompt
+
+        text = format_goals_for_prompt([self._goal], 5_000, today=date(2026, 10, 4))
+        assert "is NOT ENOUGH" in text and "shortfall" in text
+
+    def test_no_verdict_without_a_savings_rate_or_target_date(self):
+        from datetime import date
+
+        from analytics.goal_progress import format_goals_for_prompt
+
+        assert "Pace verdict" not in format_goals_for_prompt([self._goal], None, today=date(2026, 10, 4))
+        no_date = {k: v for k, v in self._goal.items() if k != "targetDate"}
+        assert "Pace verdict" not in format_goals_for_prompt([no_date], 50_000, today=date(2026, 10, 4))
+
+
+class TestPeriodNetSavingsInPrompt:
+    def test_per_period_figures_listed_and_negative_kept(self):
+        from analytics.goal_progress import format_goals_for_prompt
+
+        goals = [{"name": "Trip", "category": "Trip", "saved_amount": 1000, "target_amount": 5000}]
+        text = format_goals_for_prompt(goals, 53_121, period_net_savings=[("2026-04", 90_000), ("2026-05", -7_350)])
+        assert "2026-05: ₹-7,350" in text and "2026-04: ₹90,000" in text
+        assert "ONE specific month" in text
+
+    def test_omitted_without_period_data(self):
+        from analytics.goal_progress import format_goals_for_prompt
+
+        goals = [{"name": "Trip", "category": "Trip", "saved_amount": 1000, "target_amount": 5000}]
+        assert "each individual statement period" not in format_goals_for_prompt(goals, 53_121)

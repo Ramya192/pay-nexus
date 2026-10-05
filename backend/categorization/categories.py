@@ -16,5 +16,10 @@ CATEGORIES = [
     "Subscriptions",
     "Shopping",
     "Utilities",
+    "Investments",
+    "Transfers",
+    "Loans & EMI",
+    "Credit Card Payment",
+    "Other",
     "Uncategorized",
 ]

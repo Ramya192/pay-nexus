@@ -33,6 +33,8 @@ interface TransactionState {
   // PUT /statement/{id} itself expects too (there's no per-transaction row
   // server-side to patch, only one ciphertext blob per statement).
   updateEntryTransactions: (id: string, transactions: ParsedTransaction[]) => void;
+  // Applies a rename (account name / period label) after PATCH /statement/{id}/rename succeeds.
+  renameEntry: (id: string, sourceAccount: string, periodLabel: string) => void;
   clear: () => void;
 }
 
@@ -60,6 +62,11 @@ export const useTransactionStore = create<TransactionState>((set) => ({
   updateEntryTransactions: (id, transactions) =>
     set((s) => {
       const entries = s.entries.map((e) => (e.id === id ? { ...e, transactions } : e));
+      return { entries, transactions: flatten(entries) };
+    }),
+  renameEntry: (id, sourceAccount, periodLabel) =>
+    set((s) => {
+      const entries = s.entries.map((e) => (e.id === id ? { ...e, sourceAccount, periodLabel } : e));
       return { entries, transactions: flatten(entries) };
     }),
   clear: () => set({ entries: [], transactions: [] }),

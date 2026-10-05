@@ -6,6 +6,7 @@ import { useAuthStore } from "../../store/authStore";
 import { useTransactionStore } from "../../store/transactionStore";
 import * as statementApi from "../../api/statement";
 import * as pdfText from "../../utils/pdfText";
+import { PdfPasswordError } from "../../utils/pdfPasswordError";
 import * as encryption from "../../crypto/clientEncryption";
 import * as contentHash from "../../utils/contentHash";
 
@@ -71,6 +72,26 @@ describe("CreditCardStatementUploader", () => {
     await user.upload(screen.getByLabelText(/Upload credit card statement/), pdfFile());
 
     expect(screen.getByText(/Name the card first/)).toBeInTheDocument();
+  });
+
+  it("prompts for a PDF password and retries extraction with it", async () => {
+    const user = userEvent.setup();
+    const extract = vi.mocked(pdfText.extractPdfText);
+    extract.mockRejectedValueOnce(new PdfPasswordError(false)).mockResolvedValueOnce("statement text");
+    vi.spyOn(statementApi, "parseStatementText").mockResolvedValue({
+      transactions: [txn()],
+      skipped_row_count: 0,
+      truncated_chars: 0,
+    });
+    render(<CreditCardStatementUploader />);
+    await user.type(screen.getByLabelText("Card name"), "HDFC Credit Card");
+
+    await user.upload(screen.getByLabelText(/Upload credit card statement/), pdfFile());
+    await user.type(await screen.findByLabelText(/password-protected/), "s3cret");
+    await user.click(screen.getByRole("button", { name: "Unlock" }));
+
+    await waitFor(() => expect(screen.getByLabelText("Payment due date")).toBeInTheDocument());
+    expect(extract).toHaveBeenLastCalledWith(expect.any(File), "s3cret");
   });
 
   it("requires both a billing-cycle label and a due date before saving", async () => {

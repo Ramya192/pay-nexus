@@ -162,9 +162,19 @@ export function AuthScreen() {
       } catch (budgetErr) {
         console.warn("Could not load budget", budgetErr);
       }
-    } catch {
+    } catch (err) {
+      // Only a real credentials rejection (4xx) gets the credentials message: a 429 is the
+      // rate limiter, and a 5xx or a dead network says nothing about the password -- showing
+      // "Incorrect email or password" there sends the user off retyping a correct one.
+      const status = (err as { response?: { status?: number } })?.response?.status;
       setError(
-        mode === "login" ? "Incorrect email or password." : "Could not create that account."
+        status === 429
+          ? "Too many attempts — please wait a minute and try again."
+          : status === undefined || status >= 500
+            ? "Something went wrong on our side — please try again."
+            : mode === "login"
+              ? "Incorrect email or password."
+              : "Could not create that account."
       );
     } finally {
       setLoading(false);

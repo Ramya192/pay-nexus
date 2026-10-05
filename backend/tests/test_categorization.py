@@ -159,3 +159,28 @@ class TestCategorizeTransactionsTierOrdering:
         result = categorize_module.categorize_transactions([txn], _TRAINING_DATA)
         assert result[0].category == "Subscriptions"
         assert result[0].category_source == "rule"
+
+
+class TestUtilitiesVsTransfers:
+    """Utilities keywords are whole-word and sit below Transfers, so a
+    bank-to-bank movement that names a telecom isn't counted as a bill."""
+
+    def test_plain_bills_still_utilities(self):
+        from categorization.rules import apply_rules
+        for d in ("AIRTEL POSTPAID BILL", "UPI-JIO RECHARGE", "STATE ELECTRICITY BOARD", "ACT BROADBAND", "BWSSB WATER DEPT"):
+            assert apply_rules(d) == "Utilities", d
+
+    def test_telecom_named_transfer_is_transfer(self):
+        from categorization.rules import apply_rules
+        assert apply_rules("IMPS-123456-AIRTEL PAYMENTS BANK") == "Transfers"
+        assert apply_rules("NEFT-JIO PAYMENTS BANK LTD") == "Transfers"
+
+    def test_keywords_do_not_match_inside_longer_words(self):
+        from categorization.rules import apply_rules
+        assert apply_rules("UPI-BHAJIOLA STORES") != "Utilities"
+        assert apply_rules("UPI-AIRTELX CAFE") != "Utilities"
+
+    def test_investments_and_loans_still_beat_transfers(self):
+        from categorization.rules import apply_rules
+        assert apply_rules("IMPS-99-ZERODHA BROKING") == "Investments"
+        assert apply_rules("NEFT-HOME LOAN EMI") == "Loans & EMI"

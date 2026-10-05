@@ -23,10 +23,9 @@
  * backend/tax_calculations.py's SECTION_80C_LIMIT / SECTION_80D_LIMIT_* /
  * SECTION_24B_LIMIT, not imported — there's no shared package between the
  * Python backend and this TS frontend. If those limits ever change, update
- * both. Deliberately a rough check, not a Section-accurate one the way the
- * backend's version is (e.g. no employee-PF annualization) — good enough
- * for "you have meaningfully unused room, go ask," not a replacement for
- * the real chat-computed figure. The V2 alerts below carry the same
+ * both. The 80C/80D/24(b) figures mirror the backend's compute_all_gaps
+ * (including PPF and the latest payslip's employee PF x 12) so the banner and
+ * the Savings Advisor's table agree; keep them in step. The V2 alerts below carry the same
  * "duplicated logic, not imported" caveat relative to
  * backend/budgeting/budgets.py's check_overspending and
  * backend/analytics/spending_trends.py's period grouping.
@@ -79,7 +78,7 @@ export function computeAlerts(
   return [
     itrFilingDeadlineAlert(now),
     regimeDeclarationAlert(now),
-    deductionHeadroomAlert(now, financialProfile),
+    deductionHeadroomAlert(now, financialProfile, snapshots),
     stalePayslipAlert(now, snapshots),
     overspendingAlert(transactions, budget),
     goalDeadlineApproachingAlert(now, goals),
@@ -116,21 +115,34 @@ function regimeDeclarationAlert(now: Date): Alert | null {
   };
 }
 
-function deductionHeadroomAlert(now: Date, financialProfile: FinancialProfile | null): Alert | null {
+function deductionHeadroomAlert(
+  now: Date,
+  financialProfile: FinancialProfile | null,
+  snapshots: Record<string, unknown>[] = []
+): Alert | null {
   const month = now.getMonth();
   if (month < FY_END_HEADROOM_START_MONTH || month > FY_END_HEADROOM_END_MONTH) return null;
   if (!financialProfile) return null;
 
   const num = (v: number | undefined) => (typeof v === "number" && v > 0 ? v : 0);
+  // Same 80C inputs as backend/tax_calculations.py's compute_80c: ELSS + PPF +
+  // life insurance + home-loan principal + the latest payslip's employee PF x 12.
+  const latestPayslip = [...snapshots]
+    .filter((s) => typeof s.month === "string")
+    .sort((a, b) => String(a.month).localeCompare(String(b.month)))
+    .pop();
+  const pfAnnualized = latestPayslip ? num(latestPayslip.pfEmployee as number | undefined) * 12 : 0;
   const used80c =
     num(financialProfile.elssMutualFunds) +
+    num(financialProfile.ppf) +
     num(financialProfile.lifeInsurancePremium) +
-    num(financialProfile.homeLoanPrincipalPaid);
+    num(financialProfile.homeLoanPrincipalPaid) +
+    pfAnnualized;
   const remaining80c = Math.max(0, SECTION_80C_LIMIT - used80c);
 
   const senior = financialProfile.healthInsuranceForSeniorCitizen === true;
   const limit80d = senior ? SECTION_80D_LIMIT_SENIOR : SECTION_80D_LIMIT_STANDARD;
-  const remaining80d = Math.max(0, limit80d - num(financialProfile.healthInsurancePremium));
+  const remaining80d = Math.max(0, limit80d - Math.min(num(financialProfile.healthInsurancePremium), limit80d));
 
   const remaining24b = Math.max(0, SECTION_24B_LIMIT - num(financialProfile.homeLoanInterestPaid));
 

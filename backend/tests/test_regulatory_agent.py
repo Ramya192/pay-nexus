@@ -198,3 +198,21 @@ class TestWebSearchMissIsNotCached:
 
         assert cache_calls == [("what are the new payslip rules in 2026?", real_answer)]
         assert real_answer in result["regulatory_response"]
+
+
+class TestCachedAnswerProvenance:
+    def test_cached_web_answer_replay_says_where_it_came_from(self, monkeypatch):
+        from types import SimpleNamespace
+
+        import agents.regulatory_agent as reg
+
+        doc = SimpleNamespace(
+            metadata={"source": "web_search_cache", "original_query": "latest EPFO rule change"},
+            page_content="Question: latest EPFO rule change\n\nAnswer: No 2026 change was announced.",
+        )
+        monkeypatch.setattr(reg, "retrieve_with_scores", lambda q, k: [(doc, 0.01)])
+        monkeypatch.setattr(reg, "is_cached_answer_expired", lambda d: False)
+        monkeypatch.setattr(reg, "is_same_cached_question", lambda a, b: True)
+        out = reg.regulatory_agent_node({"user_query": "latest EPFO rule change"})
+        assert out["regulatory_response"].startswith("📌 Saved from an earlier live web search")
+        assert out["regulatory_response"].endswith("No 2026 change was announced.")

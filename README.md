@@ -3,8 +3,8 @@
 > "Your pay, explained. Your finances, guided."
 
 A multi-agent agentic AI system for salaried employees in India — not a chatbot, a coordinated team
-of seven specialized reasoning agents behind an orchestrator, covering payslips, tax regulation,
-spending, budgeting, and savings goals in one place.
+of eight specialized reasoning agents behind an orchestrator, covering payslips, tax regulation,
+spending, budgeting, savings goals, what-if planning, and a monthly recap in one place.
 
 **V1** (payslip + tax regulation only, 3 agents) is live: [nice-desert-0837ea310.7.azurestaticapps.net](https://nice-desert-0837ea310.7.azurestaticapps.net)
 · `paynexus-api.azurewebsites.net` (backend API, currently stopped to consolidate hosting cost).
@@ -42,7 +42,10 @@ already gotten right. It could — genuinely wired into the live `/chat` endpoin
 then kept growing past pure parity: a live orchestration deadlock found and fixed against the real
 running server, a self-updating RAG web-search fallback, capacity-aware context compression, and
 every V2 feature request that came in afterward (manual cash entry, credit-card billing-cycle
-tracking) landed here instead of on `v2-dev`.
+tracking) landed here instead of on `v2-dev`. From 2026-09-19 it also grew an eighth agent (Monthly
+Digest), a logistic-regression categorization tier, live goal valuation, spending-trend projection
+with charts, and a hardened CI/IaC pipeline — see [Beyond the original scope](#beyond-the-original-scope-v21)
+below.
 
 Once V2.1 had genuinely caught up feature-for-feature and then kept going, `v2-dev` became pure
 overhead — two branches to keep in sync for one product. It was deleted from GitHub on
@@ -61,15 +64,18 @@ all AES-256-GCM ciphertext end to end, encrypted/decrypted only in the browser.
 ```mermaid
 graph LR
     User["Browser<br/>(React)"] <-->|ciphertext only| Backend
-    Backend["FastAPI +<br/>Agent Framework Orchestrator"] --> Agents["7 Reasoning Agents"]
+    Backend["FastAPI +<br/>Agent Framework Orchestrator"] --> Agents["8 Reasoning Agents"]
     Agents --> Foundry["Azure AI Foundry<br/>(paynexus-foundry)"]
     Backend <--> DB[("PostgreSQL<br/>+ pgvector")]
 ```
 
-The Orchestrator (`agents/orchestrator_v2.py` — Microsoft Agent Framework's `ConcurrentBuilder`, as
-of the V2.1 migration below) classifies each question and fans it out — concurrently — to whichever
-of the seven agents actually apply; a payslip question hits one agent, "which regime should I pick
-and how much would I save, and am I still on budget" might hit four. Requests that try to add/edit/
+The Orchestrator (`agents/orchestrator_v2.py` — an Agent Framework structured-output intent
+classifier plus plain `asyncio.gather` for the fan-out, as of the V2.1 migration below) classifies
+each question and fans it out — concurrently — to whichever
+of the eight agents actually apply; a payslip question hits one agent, "which regime should I pick
+and how much would I save, and am I still on budget" might hit four. An explicit whole-picture
+request ("how did I do this month?") is routed to the Monthly Digest agent *alone*, since it already
+synthesizes what the individual agents would each say. Requests that try to add/edit/
 delete saved data through chat (not a question, an instruction) are caught by a dedicated no-LLM
 capability-gap node instead of being silently misrouted or hallucinated as done.
 
@@ -82,6 +88,7 @@ capability-gap node instead of being silently misrouted or hallucinated as done.
 | BudgetPlanner | Hybrid | Actual spend vs. saved per-category budget targets — period-prorated so a statement longer than a month doesn't falsely read as overspending |
 | GoalTracker | Hybrid | Savings-goal progress and whether the current pace hits a target date |
 | Foresight (What-If) | gpt-4o | Explicit hypotheticals — "what if I switched regime / cut my budget by ₹1,000 / saved ₹500 more toward a goal / contributed 2% more to PF" |
+| Monthly Digest | gpt-4o | One flowing recap across payslip trends, spending, budget, and goals. Never sees a raw statement — it only weaves together figures Python already computed, so it adds no new source of numbers |
 
 A user never has to ask to be warned, either — client-side, no-LLM proactive alerts (ITR deadline,
 regime-declaration window, deduction headroom, stale payslip/statement, over-budget category,
@@ -137,13 +144,15 @@ real data-integrity risk, not just a deploy-pipeline one. Real ongoing cost: **~
 the *same* Basic B1 plan doesn't add plan cost, just shares its compute), currently running against
 a $200 Azure free-trial credit with a hard spending limit (no card can be charged).
 
-**Account Aggregator (AA) integration** — automatic bank-statement fetch via Setu/FinVu — was
-built and tested against both providers' real API contracts, then removed entirely rather than
-shipped unusable: both require FIU registration with RBI/SEBI/IRDAI (Setu additionally gates its
-KYC step on a GSTIN), a structural requirement for registered financial institutions that doesn't
-have a self-serve path for an individual developer. Bank statements are uploaded manually (CSV or
-PDF, parsed client-side/server-side with no AA dependency) instead — a known, defensible scope
-limitation, not a bug.
+**Account Aggregator (AA) integration — roadmap, not shipped.** Automatic bank-statement fetch
+through an Account Aggregator (Setu) is built and verified against Setu's *sandbox* (consent
+creation and approval, data fetch, transaction mapping) on the separate `aa-sandbox-integration`
+branch of the `paynexus-v2.1-aa-integration` folder. It is not merged and not part of what's
+deployed. Two things stand between that and production: Setu's sandbox data-retrieval endpoint
+intermittently hangs after a fetch has completed (raised with Setu support), and going live
+requires registration as a financial-information user with the regulators, which has no
+self-serve path for an individual developer. Until then, statements are uploaded manually (CSV or
+PDF) — a known scope limit, not a bug.
 
 **Password recovery** — there is no "forgot password" flow, and this is by design, not an
 oversight. The AES-256-GCM key that encrypts every payslip, financial-profile, transaction, goal,
@@ -172,14 +181,18 @@ real running server, not just unit tests.
 
 **Two architecture calls made deliberately, given no deadline pressure, favoring the stronger
 engineering story over the lower-risk default:**
-- **Orchestration**: `agent_framework_orchestrations.ConcurrentBuilder`, with each agent wrapped in
-  a custom `Executor` rather than a bare `Agent` — `ConcurrentBuilder`'s default dispatcher
-  broadcasts one shared input to every participant, which would break the privacy boundary that
-  keeps e.g. Regulatory Intelligence from ever seeing financial data; each custom executor ignores
-  the broadcast and builds its own narrow, state-scoped prompt instead. `ConcurrentBuilder` also
-  turned out to require at least 2 participants (a real library constraint, not documented up
-  front) — the common case of exactly one selected agent short-circuits around it entirely rather
-  than padding a real turn with a fake extra participant.
+- **Orchestration**: first built on `agent_framework_orchestrations.ConcurrentBuilder`, with each
+  agent wrapped in a custom `Executor` (its default dispatcher broadcasts one shared input to every
+  participant, which would break the privacy boundary that keeps e.g. Regulatory Intelligence from
+  ever seeing financial data). It also required at least 2 participants, so single-agent turns had
+  to short-circuit around it. **That version was replaced on 2026-09-11**: with 2 real agents it
+  deadlocked completely inside the live uvicorn server (both `agent_active` events, then nothing for
+  90+ seconds) yet ran fine in an isolated script — an interaction with the already-running event
+  loop. The shipped design keeps Agent Framework for what it does well — `FoundryChatClient` calls
+  and Pydantic structured output, including the intent classifier — and runs the selected agents with
+  plain `asyncio.gather` over `asyncio.to_thread`. Same real concurrency, one code path for one agent
+  or several, no JSON round-trip between agents, and `agent-framework-orchestrations` is no longer a
+  dependency.
 - **Runtime client**: `FoundryChatClient` against a real Azure AI Foundry project, not the simpler
   `OpenAIChatClient` + plain API key path (confirmed to work with zero Azure dependency, and would
   have been the safer default). This meant standing up a genuine Foundry **Agent Service** capability
@@ -195,10 +208,12 @@ Foundry's shared "GlobalStandard" capacity tier occasionally returned a schema-v
 completion — reproduced 0/8 times in isolation, confirmed as a load characteristic (not a prompt
 bug) by tripling deployment capacity and watching it persist, then mitigated with a content-aware
 retry heuristic (checks for an actual ₹ figure, not just response length, after an earlier version
-of the check missed a longer-but-still-evasive answer); (3) a state-partial dict smuggled through
-`ConcurrentBuilder`'s message-passing as JSON text silently lost its `LLMCallMetrics` objects'
-Pydantic typing on the way back out — caught only once a test was strengthened to actually exercise
-the real concurrent path instead of a short-circuit that happened to skip the bug entirely.
+of the check missed a longer-but-still-evasive answer); (3) the `ConcurrentBuilder` deadlock
+described above — found by reproducing it against the real running server, not by unit tests, and
+resolved by dropping the library's workflow engine rather than working around it. (An earlier bug on
+that path — state-partial dicts passed through its message-passing as JSON text silently lost their
+`LLMCallMetrics` typing — disappeared with the same change, since `asyncio.gather` returns real
+Python objects.)
 
 Every agent's JSON contract is now a Pydantic model instead of a hand-parsed dict (`response.value`
 returns an already-validated instance, not raw text needing `json.loads` + `try/except`), and the
@@ -220,27 +235,53 @@ salary, never the model). Live-verified against the real Foundry backend, not ju
 2% PF increase on a ₹70,000 basic correctly computed a ₹1,400/month net pay drop and the resulting
 old-regime tax change, matched by hand against the slab math independently.
 
+## Beyond the original scope (V2.1)
+
+Added after V2.1 reached parity with V2, all under the same rule as everything else here: the number
+comes from Python, the model only narrates it.
+
+- **ML categorization tier.** Transactions are categorized by keyword rules first, then a
+  confidence-gated TF-IDF + `LogisticRegression` tier, then the LLM as the last fallback
+  (`categorization/ml_classifier.py`). Nothing is persisted: bank data is ciphertext at rest, so the
+  frontend sends a sample of the user's own already-decrypted history with each request, the model is
+  fit and used inside that one call, and it is discarded on return. It skips itself below 20 labeled
+  examples or fewer than 2 categories, and defers to the LLM below 0.6 predicted probability.
+- **Spending-trend projection + charts.** `analytics/trend_projection.py` fits a least-squares line
+  (`scikit-learn`) once there are at least 3 periods of history — with fewer, a line fits perfectly
+  and means nothing, so it returns nothing instead. Rendered as real charts in the UI (`recharts`).
+- **Live goal valuation.** A savings goal can be linked to a fixed deposit (compound-interest math,
+  quarterly compounding, no network call) or a mutual fund (real daily NAV via `mfapi.in`, which
+  republishes AMFI data). Individual stocks were deliberately left out — FDs and mutual funds cover the
+  real case. A failed price lookup leaves that one goal's live value blank rather than breaking the tab.
+- **Monthly Digest agent** (the eighth agent above) and **payslip what-if math** (`payslip_math.py`,
+  described in the migration section).
+
+**Deliberately not built:** voice input (Whisper) and receipt image parsing (GPT-4V) were in the
+original plan and dropped — manual cash entry closes the same gap more simply.
+
 ## Stack
 
 | Area | Choice | Why |
 |---|---|---|
-| Orchestration | Microsoft Agent Framework — `ConcurrentBuilder` (V2.1; V2 used LangGraph `StateGraph`) | Typed executors, structured-output classification, real concurrent fan-out |
+| Orchestration | Agent Framework structured-output classifier + `asyncio.gather` fan-out (V2.1; V2 used LangGraph `StateGraph`; `ConcurrentBuilder` was tried and removed) | Real concurrent fan-out without the workflow engine that deadlocked under uvicorn |
 | Frontend | React 19 + TypeScript + Vite | Current stable, fast dev loop |
 | Styling | Tailwind v4, CSS-first via `@theme` | No separate config file, current major version |
 | Frontend state | Zustand | One small store per concern (auth, chat, goals, budget, statements, alerts UI, …) |
+| Charts | Recharts | Spending breakdowns and trend projection |
+| Classical ML | scikit-learn (logistic regression, linear regression), NumPy | Small, explainable models where an LLM call would be slower and costlier |
 | Encryption | Client-side AES-256-GCM (PBKDF2-derived key) | Server never sees plaintext financial data |
 | Vector store | pgvector on the same Postgres instance | One database instead of a separate vector service |
 | LLM provider | Azure AI Foundry (gpt-4o / gpt-4.1-mini via Agent Framework's `FoundryChatClient`; V2 called OpenAI directly), local Ollama fallback for hybrid agents | Genuine Foundry Agent Service integration — see migration section above |
-| Statement ingestion | CSV parsed directly (no LLM); PDF text extracted client-side (pdfjs-dist) and structured via GPT-4o | The PDF itself never reaches the server, only extracted text does |
-| Frontend testing | Vitest + React Testing Library | 282 tests (stores, API layer, all components) — see Testing below |
+| Statement ingestion | CSV parsed directly (no LLM); PDF text extracted client-side (pdfjs-dist) and structured via gpt-4o-mini (gpt-4.1-mini on Foundry) | The PDF itself never reaches the server, only extracted text does |
+| Frontend testing | Vitest + React Testing Library | 289 tests (stores, API layer, all components) — see Testing below |
 
 ## Testing
 
-- **`backend/tests/`** — 440 pytest tests, zero setup (`cd backend && pytest`) — unit tests covering
+- **`backend/tests/`** — 473 pytest tests (454 offline + 19 live-integration), zero setup (`cd backend && pytest`) — unit tests covering
   every concrete bug this build found across V1, V2, and the V2.1 Agent Framework migration (tax
   slab math, deduction gaps, trends, compression, table dedup, budget period-proration,
   duplicate-transaction-ID disambiguation, Ollama's markdown-fence JSON issue,
-  `ConcurrentBuilder` fan-out/merge wiring), plus `@pytest.mark.integration` tests that hit the real
+  concurrent `asyncio.gather` fan-out/merge wiring), plus `@pytest.mark.integration` tests that hit the real
   Foundry/OpenAI APIs.
 - **Coverage: 80.0% branch coverage** (`pytest --cov=.`, config in `.coveragerc`) on the
   deterministic, non-integration tier — measured on application code only (test files and one-off
@@ -251,18 +292,23 @@ old-regime tax change, matched by hand against the slab math independently.
   by a real test elsewhere. Generated on every CI run (`deploy-v2.yml`'s coverage summary step), not
   a one-off number.
 - **`backend/rag/eval.py`** — retrieval hit-rate@k, MRR, and generation keyword-coverage against a
-  hand-verified ground-truth set. Current: 94% hit-rate, 0.853 MRR, 100% keyword coverage.
+  hand-verified ground-truth set. Current (re-run 2026-10-04): 94% hit-rate, 0.853 MRR, 94% keyword coverage.
 - **`backend/agent_eval/eval.py`** — the same keyword-coverage approach for narrated agent answers,
   plus forbidden-phrase checks for this build's recurring failure mode (a confidently *wrong*
-  conclusion stated despite correct numbers in the same prompt).
+  conclusion stated despite correct numbers in the same prompt). Current (re-run 2026-10-04): 10 hand-verified cases, 100% pass rate, 0 forbidden phrases stated — a small set, so read it as a regression guard, not a broad accuracy claim.
 - **`backend/compression/eval.py`** — real before/after token-cost measurement for context
   compression (Level 1 in-session sliding window, Level 2 cross-session summarization).
+- **`paynexus-v2.1-test-suite`** (a separate local project, not in this repo) — a live end-to-end
+  pytest suite that makes real HTTP calls against a running backend and real Foundry calls, with an
+  HTML report per run. Covers routing for every agent, cross-domain privacy isolation, tax-regime
+  math hand-checked against Budget 2025-26, What-If, duplicate detection, and regression tests for a
+  real Foundry hang and a regulatory cache false positive. Deliberately not mocked.
 - **`.claude/skills/run-paynexus/`** — the agent-facing runbook: direct Python invocation, `curl`
   recipes, and Playwright drivers (`driver.mjs` for V1's flow, `v2_flows_driver.mjs` +
   `v2_flows_driver_part2.mjs` for V2's — registration through every CRUD flow, proactive alerts,
   the subscriptions filter, capability-gap responses, and cross-session memory, verified against
   the real network request, not LLM wording).
-- **`frontend/src/` — 282 Vitest + React Testing Library tests** (`npm test`), a real, blocking CI
+- **`frontend/src/` — 289 Vitest + React Testing Library tests** (`npm test`), a real, blocking CI
   gate alongside `pytest` rather than an afterthought: all 10 Zustand stores, all 8 API modules
   (including a hand-rolled Server-Sent-Events stream parser test for the chat endpoint's manual SSE
   reader), and all 27 components — asserting on actual branch conditions and derived state (a
@@ -315,9 +361,8 @@ not a second live measurement.
 
 ## Observability (2026-09-14)
 
-Added specifically to close a gap the honest scorecard review flagged: every number in the
-Performance and Unit economics sections above came from a one-off manual measurement, not
-something anyone could go check live.
+Added specifically to close a gap: every number in the Performance and Unit economics sections
+above came from a one-off manual measurement, not something anyone could go check live.
 
 - **Application Insights, opt-in and off by default.** `api/main.py` only calls
   `configure_azure_monitor()` when `APPLICATIONINSIGHTS_CONNECTION_STRING` is set — every local
@@ -402,29 +447,30 @@ actual route code, not a substitute for one.
 ## Layout
 
 ```
-paynexus-v2/
+paynexus-v2.1/
 ├── backend/
-│   ├── agents/          Agent Framework orchestrator (orchestrator_v2.py) + 7 reasoning agents
+│   ├── agents/          Agent Framework orchestrator (orchestrator_v2.py) + 8 reasoning agents
 │   ├── agent_eval/       answer-quality eval harness
-│   ├── analytics/        spending trends, recurring-merchant/subscriptions detection
+│   ├── analytics/        spending trends, trend projection, goal progress, live FD/MF valuation
 │   ├── budgeting/        budget vs. actual-spend checks
-│   ├── categorization/   rule-based transaction categorization (+ LLM fallback)
+│   ├── categorization/   rules → logistic-regression tier → LLM fallback
 │   ├── ingestion/        CSV statement parsing
 │   ├── rag/              retriever, index builder, eval harness
 │   ├── compression/      context compression + its eval harness
 │   ├── security/         auth, password hashing
 │   ├── db/                SQLAlchemy models, session handling
-│   ├── tests/             440 pytest tests
+│   ├── tests/             473 pytest tests
 │   ├── alembic/          migrations — alembic upgrade head before first run
 │   ├── Dockerfile         real, tested container for App Service
 │   └── ...                FastAPI app, statement/payslip extraction, tax computation modules
-├── frontend/              React 19 + TypeScript + Tailwind v4 (Vite) — 282 Vitest tests (stores,
+├── frontend/              React 19 + TypeScript + Tailwind v4 (Vite) — 289 Vitest tests (stores,
 │                          API layer, all 27 components), `npm test`
 │   └── src/components/    Auth, Dashboard (tabs), Chat, ChatWidget, Alerts, GoalTracker,
 │                          BudgetPlanner, StatementUploader, PayslipUploader, FinancialProfile
+├── infra/                 v2-core.bicep (App Service, Static Web App, App Insights) + ROLLBACK.md
 ├── rag_documents/         Indian tax-law source docs embedded into pgvector
 ├── .claude/skills/run-paynexus/   agent-facing runbook — direct invocation, curl, Playwright
-└── .github/workflows/     CI/CD to Azure (Docker Hub + Static Web Apps) — watches `main` only
+└── .github/workflows/     CI/CD to Azure (Docker Hub + Static Web Apps) — `deploy-v2.yml` watches `foundry-v2`
 ```
 
 ## Quick start

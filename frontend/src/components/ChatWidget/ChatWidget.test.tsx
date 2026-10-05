@@ -16,11 +16,13 @@ beforeEach(() => {
 });
 
 describe("ChatWidget", () => {
-  it("shows only the launcher button when closed", () => {
+  it("shows only the launcher button when closed, keeping ChatInterface mounted but hidden", () => {
     useChatWidgetUiStore.setState({ open: false });
     render(<ChatWidget />);
     expect(screen.getByRole("button", { name: "Open chat" })).toBeInTheDocument();
-    expect(screen.queryByTestId("chat-interface")).not.toBeInTheDocument();
+    // Still mounted so an in-flight answer/queue survives minimizing; jsdom has no Tailwind
+    // CSS, so "hidden" is asserted via the class that display:none comes from.
+    expect(screen.getByTestId("chat-interface").closest(".hidden")).not.toBeNull();
   });
 
   it("shows the panel with ChatInterface mounted when open", () => {

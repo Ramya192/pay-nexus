@@ -9,8 +9,11 @@ import {
 import { encryptJSON } from "../../crypto/clientEncryption";
 import { useAuthStore } from "../../store/authStore";
 import { useTransactionStore, type StatementEntry } from "../../store/transactionStore";
+import { TRANSACTION_CATEGORIES } from "../../utils/categories";
 import { computeContentHash } from "../../utils/contentHash";
+import { PdfPasswordError } from "../../utils/pdfPasswordError";
 import { extractPdfText } from "../../utils/pdfText";
+import { PdfPasswordPrompt } from "../PdfPasswordPrompt";
 
 type Status = "idle" | "reading" | "parsing" | "review" | "saving" | "saved" | "error";
 
@@ -44,11 +47,18 @@ export function StatementUploader() {
   const [periodLabel, setPeriodLabel] = useState("");
   const [parsed, setParsed] = useState<ParsedTransaction[] | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
+  // Set while an encrypted PDF is waiting for its password.
+  const [passwordPending, setPasswordPending] = useState<{ file: File; incorrect: boolean } | null>(null);
 
-  async function handleFile(e: ChangeEvent<HTMLInputElement>) {
+  function handleFile(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = ""; // clear so re-selecting the same file re-fires onChange
     if (!file) return;
+    setPasswordPending(null);
+    void processFile(file);
+  }
+
+  async function processFile(file: File, password?: string) {
     if (!sourceAccount.trim()) {
       setError("Name the account first (e.g. \"HDFC Checking\") so this statement can be told apart from others.");
       return;
@@ -57,10 +67,11 @@ export function StatementUploader() {
     setError(null);
     setParsed(null);
     setWarnings([]);
+    setPasswordPending(null);
     setStatus("reading");
     try {
       const format = file.name.toLowerCase().endsWith(".csv") ? "csv" : "pdf";
-      const text = format === "pdf" ? await extractPdfText(file) : await file.text();
+      const text = format === "pdf" ? await extractPdfText(file, password) : await file.text();
       if (!text.trim()) {
         throw new Error(
           format === "pdf"
@@ -91,6 +102,11 @@ export function StatementUploader() {
       setPeriodLabel(defaultPeriodLabel(result.transactions));
       setStatus("review");
     } catch (err) {
+      if (err instanceof PdfPasswordError) {
+        setStatus("idle");
+        setPasswordPending({ file, incorrect: err.incorrect });
+        return;
+      }
       setStatus("error");
       setError(err instanceof Error ? err.message : "Couldn't read that statement.");
     }
@@ -131,7 +147,21 @@ export function StatementUploader() {
     }
   }
 
+  // Fix a wrong/missing category before saving. Marked user_corrected so
+  // future uploads learn from it (it feeds historical_labels).
+  function handleRowCategory(transactionId: string, category: string) {
+    setParsed((rows) =>
+      rows
+        ? rows.map((t) =>
+            t.transaction_id === transactionId ? { ...t, category, category_source: "user_corrected" } : t
+          )
+        : rows
+    );
+  }
+
   const busy = status === "reading" || status === "parsing" || status === "saving";
+  const uncategorizedCount =
+    parsed?.filter((t) => (t.category ?? "Uncategorized") === "Uncategorized" || t.category_source === "default").length ?? 0;
 
   return (
     <div className="space-y-3">
@@ -168,6 +198,15 @@ export function StatementUploader() {
         />
         {status === "reading" && <p className="text-xs text-slate-500">Reading file…</p>}
         {status === "parsing" && <p className="text-xs text-slate-500">Extracting and categorizing transactions…</p>}
+        {passwordPending && (
+          <PdfPasswordPrompt
+            fileName={passwordPending.file.name}
+            incorrect={passwordPending.incorrect}
+            disabled={busy}
+            onSubmit={(pw) => void processFile(passwordPending.file, pw)}
+            onCancel={() => setPasswordPending(null)}
+          />
+        )}
         {error && <p className="text-xs text-red-600">{error}</p>}
       </div>
 
@@ -180,6 +219,7 @@ export function StatementUploader() {
           ))}
           <p className="text-xs text-slate-500">
             {parsed.length} transaction(s) found — review below, then save.
+            {uncategorizedCount > 0 && ` ${uncategorizedCount} row(s) couldn't be matched and were filled in automatically (credits as Income, debits as Other, highlighted) — change any that are wrong.`}
           </p>
           <ul className="max-h-56 space-y-1 overflow-y-auto text-xs">
             {parsed.map((t) => (
@@ -188,9 +228,25 @@ export function StatementUploader() {
                   {t.date} · {t.description}
                 </span>
                 <span className="flex shrink-0 items-center gap-2">
-                  <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">
-                    {t.category ?? "Uncategorized"}
-                  </span>
+                  <select
+                    value={t.category ?? "Uncategorized"}
+                    onChange={(e) => handleRowCategory(t.transaction_id, e.target.value)}
+                    disabled={busy}
+                    aria-label={`Category for ${t.description}`}
+                    className={`rounded border px-1 py-0.5 text-[10px] ${
+                      t.category_source === "user_corrected"
+                        ? "border-brand-300 bg-brand-50 text-brand-700"
+                        : (t.category ?? "Uncategorized") === "Uncategorized" || t.category_source === "default"
+                          ? "border-amber-300 bg-amber-50 text-amber-700"
+                          : "border-slate-200 bg-slate-100 text-slate-500"
+                    }`}
+                  >
+                    {TRANSACTION_CATEGORIES.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
                   <span className={t.amount < 0 ? "text-slate-700" : "text-emerald-600"}>
                     {t.amount < 0 ? "-" : "+"}₹{Math.abs(t.amount).toLocaleString("en-IN", { maximumFractionDigits: 0 })}
                   </span>

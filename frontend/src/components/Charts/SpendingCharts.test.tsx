@@ -20,6 +20,40 @@ describe("SpendingCharts", () => {
     expect(fetchAnalytics).not.toHaveBeenCalled();
   });
 
+  it("says what the pie leaves out (transfers, investments) instead of hiding it", async () => {
+    vi.spyOn(statementApi, "fetchSpendingAnalytics").mockResolvedValue({
+      category_breakdown: [{ category: "Rent", total_spent: 20_000 }],
+      excluded_from_spending: [
+        { category: "Transfers", total_spent: 450_000 },
+        { category: "Investments", total_spent: 10_000 },
+      ],
+      savings_projection: null,
+    });
+    useTransactionStore.getState().setEntries([
+      {
+        id: "s1",
+        sourceAccount: "HDFC",
+        periodLabel: "2026-08",
+        createdAt: "2026-08-31",
+        transactions: [
+          {
+            transaction_id: "t1",
+            date: "2026-08-05",
+            description: "Rent",
+            amount: -20_000,
+            source_account: "HDFC",
+            category: "Rent",
+            category_source: "rule",
+          },
+        ],
+      },
+    ]);
+    render(<SpendingCharts />);
+    await waitFor(() =>
+      expect(screen.getByText(/Not counted as spending: Transfers ₹4,50,000 · Investments ₹10,000/)).toBeInTheDocument()
+    );
+  });
+
   it("fetches analytics once transactions exist and renders both chart headings on success", async () => {
     vi.spyOn(statementApi, "fetchSpendingAnalytics").mockResolvedValue({
       category_breakdown: [{ category: "Rent", total_spent: 20_000 }],

@@ -87,6 +87,12 @@ class PayslipFieldChange:
     scenario_payslip: dict
     baseline_value: float
     scenario_value: float
+    # What the change asked for before flooring at 0 (None when not tracked).
+    requested_value: float | None = None
+
+    @property
+    def clamped(self) -> bool:
+        return self.requested_value is not None and self.requested_value < 0
 
 
 def apply_field_change(
@@ -122,9 +128,10 @@ def apply_field_change(
         scenario_value = baseline_value + (_num(delta_percent_of_basic) / 100.0) * _num(payslip.get("basic"))
     else:
         return None
+    requested_value = scenario_value
     scenario_value = max(0.0, scenario_value)
     scenario_payslip = {**payslip, field: scenario_value}
-    return PayslipFieldChange(field, scenario_payslip, baseline_value, scenario_value)
+    return PayslipFieldChange(field, scenario_payslip, baseline_value, scenario_value, requested_value)
 
 
 def net_pay_table(payslip: dict, *, title_suffix: str = "") -> dict:

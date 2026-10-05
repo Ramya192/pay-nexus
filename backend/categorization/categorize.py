@@ -22,6 +22,7 @@ exposure. See ml_classifier.py's own docstring for the full reasoning.
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 
 from openai import OpenAI
 
@@ -33,12 +34,45 @@ from models import Transaction
 
 _client = OpenAI(api_key=config.OPENAI_API_KEY)
 
+_LLM_BATCH_SIZE = 60
+_LLM_WORKERS = 4
+
 _SYSTEM_PROMPT = f"""Categorize each bank transaction description into exactly one of these \
 categories: {", ".join(c for c in CATEGORIES if c != "Uncategorized")}.
+
+Guidance: "Transfers" is money sent to or received from a person (a UPI/IMPS/NEFT payment to an individual's name) or moved between the user's own accounts. "Investments" is mutual funds, SIPs, stocks, RD/FD. "Loans & EMI" is loan or EMI instalments. "Credit Card Payment" is paying a credit card bill (e.g. CRED).
 
 Respond with a JSON object: {{"categories": [string, ...]}} — exactly one category per row, in \
 the same order the rows were given. Use "Uncategorized" only if truly nothing fits — never \
 force a bad match into one of the other categories just to avoid it."""
+
+
+def _categorize_batch(descriptions: list[str]) -> list:
+    user_prompt = "\n".join(f"{row_num}. {d}" for row_num, d in enumerate(descriptions, start=1))
+    response = _client.chat.completions.create(
+        model=config.SPENDING_CATEGORIZE_MODEL,
+        messages=[
+            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ],
+        response_format={"type": "json_object"},
+        temperature=0,  # same statement -> same categories/rows on every upload
+    )
+    try:
+        parsed = json.loads(response.choices[0].message.content or "{}")
+    except json.JSONDecodeError:
+        return []
+    categories = parsed.get("categories") if isinstance(parsed, dict) else None
+    return categories if isinstance(categories, list) else []
+
+
+def _apply_default(t: Transaction) -> None:
+    """Fallback when neither rules, the ML tier nor the LLM could place a
+    row: money in is treated as Income, money out as Other, so the user
+    doesn't have to hand-categorize hundreds of rows. category_source
+    "default" marks these as auto-assigned (the review list highlights them)."""
+    t.category = "Income" if t.amount > 0 else "Other"
+    t.category_source = "default"
 
 
 def categorize_transactions(
@@ -92,27 +126,35 @@ def categorize_transactions(
     if not unmatched_indices:
         return transactions
 
-    user_prompt = "\n".join(f"{row_num}. {transactions[i].description}" for row_num, i in enumerate(unmatched_indices, start=1))
-    response = _client.chat.completions.create(
-        model=config.SPENDING_CATEGORIZE_MODEL,
-        messages=[
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ],
-        response_format={"type": "json_object"},
-    )
-    parsed = json.loads(response.choices[0].message.content or "{}")
-    categories = parsed.get("categories") if isinstance(parsed, dict) else None
-    if not isinstance(categories, list):
-        categories = []
+    # Batched, not one giant call: a single reply covering hundreds of rows
+    # risks the model returning a shorter list than it was given, which
+    # would silently leave every row past that point "Uncategorized" (found
+    # on a 657-row annual statement -- ~90% of it came back Uncategorized).
+    batches = [
+        unmatched_indices[start : start + _LLM_BATCH_SIZE]
+        for start in range(0, len(unmatched_indices), _LLM_BATCH_SIZE)
+    ]
+    descriptions = [[transactions[i].description for i in batch] for batch in batches]
+    # Batches are independent, so run several at once -- done one after
+    # another, a long annual statement meant ~10 sequential LLM round trips.
+    with ThreadPoolExecutor(max_workers=_LLM_WORKERS) as pool:
+        batch_categories = list(pool.map(_categorize_batch, descriptions))
 
-    for row_num, i in enumerate(unmatched_indices):
-        category = categories[row_num] if row_num < len(categories) else None
-        if isinstance(category, str) and category in CATEGORIES:
-            transactions[i].category = category
-            transactions[i].category_source = "llm"
-        else:
-            transactions[i].category = "Uncategorized"
-            transactions[i].category_source = None
+    for batch, categories in zip(batches, batch_categories):
+        for row_num, i in enumerate(batch):
+            category = categories[row_num] if row_num < len(categories) else None
+            # Money going out can't be income -- the model sometimes says
+            # "Income" for an outgoing transfer; don't trust it.
+            if category == "Income" and transactions[i].amount < 0:
+                category = None
+            # "Uncategorized" from the model means "couldn't place it" -- same
+            # as no answer, so it falls through to the default below.
+            if category == "Uncategorized":
+                category = None
+            if isinstance(category, str) and category in CATEGORIES:
+                transactions[i].category = category
+                transactions[i].category_source = "llm"
+            else:
+                _apply_default(transactions[i])
 
     return transactions

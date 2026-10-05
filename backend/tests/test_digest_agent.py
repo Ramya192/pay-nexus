@@ -129,3 +129,28 @@ class TestDigestAgentNode:
         from config import config
 
         assert captured["model"] == config.DIGEST_AGENT_MODEL
+
+
+class TestDigestPeriodScoping:
+    def _txns(self):
+        return [
+            {"date": "2026-07-05", "description": "x", "amount": -1000, "category": "Food & Dining", "statement_period": "2026-07"},
+            {"date": "2026-08-05", "description": "y", "amount": -300, "category": "Groceries", "statement_period": "2026-08"},
+        ]
+
+    def test_this_month_table_covers_only_latest_period(self, monkeypatch):
+        captured = {}
+
+        async def fake_agent_complete(system_prompt, user_prompt, model, response_model, agent):
+            captured["prompt"] = user_prompt
+            return json.dumps({"explanation": "recap", "tables": ["spending_by_category"]}), _fake_metrics()
+
+        monkeypatch.setattr("agents.digest_agent.agent_complete", fake_agent_complete)
+        result = digest_agent_node(
+            {"user_query": "q", "payslip_history": [], "transactions": self._txns(), "goals": [], "budgets": {}, "conversation": []}
+        )
+        table = result["digest_tables"][0]
+        assert [r[0] for r in table["rows"]] == ["Groceries"]
+        assert "2026-08" in table["title"]
+        assert "latest period, 2026-08" in captured["prompt"]
+        assert "do NOT call this 'this month'" in captured["prompt"]

@@ -30,6 +30,8 @@ import random
 import re
 import time
 
+import httpx
+import openai
 from agent_framework import Agent, ChatOptions
 from agent_framework.foundry import FoundryChatClient
 from azure.identity import DefaultAzureCredential
@@ -154,6 +156,21 @@ _TIMEOUT_RETRY_BACKOFF_BASE_S = 1.5
 _TIMEOUT_RETRY_BACKOFF_JITTER_S = 1.5
 
 
+def _is_transient_connectivity_error(exc: BaseException) -> bool:
+    """A connect/read timeout or dropped connection to Foundry that the client library re-raised
+    as its own exception type (ChatClientException wrapping openai.APITimeoutError wrapping
+    httpx.ConnectTimeout, seen live) rather than a plain TimeoutError. Same shared-capacity /
+    flaky-network condition as a TimeoutError, so it gets the same backoff retry and the same
+    friendly "high demand" message instead of a generic failure."""
+    seen: set[int] = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if isinstance(exc, (httpx.TimeoutException, httpx.ConnectError, openai.APITimeoutError, openai.APIConnectionError)):
+            return True
+        exc = exc.__cause__ or exc.__context__
+    return False
+
+
 async def _run_with_timeout(agent: str, coro_factory, timeout: float | None = None, retries: int = 1):
     """Guards every real Foundry call against hanging indefinitely — and,
     as of 2026-09-12, against having to fail the whole user turn the first
@@ -216,7 +233,9 @@ async def _run_with_timeout(agent: str, coro_factory, timeout: float | None = No
     while True:
         try:
             return await asyncio.wait_for(coro_factory(), timeout=effective_timeout)
-        except TimeoutError:
+        except Exception as exc:
+            if not isinstance(exc, TimeoutError) and not _is_transient_connectivity_error(exc):
+                raise
             attempt += 1
             if attempt > retries:
                 logger.warning(

@@ -28,14 +28,6 @@ export function ChatInterface() {
   const dequeue = useChatStore((s) => s.dequeue);
   const queue = useChatStore((s) => s.queue);
   const removeFromQueue = useChatStore((s) => s.removeFromQueue);
-  const payslipData = usePayslipStore((s) => s.payslipData);
-  const financialProfile = useFinancialProfileStore((s) => s.profile);
-  const sessionHistory = useSessionHistoryStore((s) => s.history);
-  const payslipHistory = usePayslipHistoryStore((s) => s.snapshots);
-  const transactions = useTransactionStore((s) => s.transactions);
-  const goals = useGoalStore((s) => s.goals);
-  const budgets = useBudgetStore((s) => s.budget);
-
   async function runTurn(text: string) {
     // Captured BEFORE adding this turn's own (still-empty) entries below —
     // conversation is everything asked *before* this message, so a
@@ -44,6 +36,18 @@ export function ChatInterface() {
     // (not at enqueue time) also means a queued turn sees every earlier
     // turn that's actually finished by the time it's this one's turn to run.
     const conversation = buildExchanges(useChatStore.getState().messages);
+
+    // The data snapshot is read here, when this turn actually runs, not captured at render
+    // or enqueue time -- a question queued behind a slow turn must see the goal, cash entry
+    // or budget the user added while it waited (a closure over the render-time values sent
+    // the old data).
+    const payslipData = usePayslipStore.getState().payslipData;
+    const financialProfile = useFinancialProfileStore.getState().profile;
+    const sessionHistory = useSessionHistoryStore.getState().history;
+    const payslipHistory = usePayslipHistoryStore.getState().snapshots;
+    const transactions = useTransactionStore.getState().transactions;
+    const goals = useGoalStore.getState().goals;
+    const budgets = useBudgetStore.getState().budget;
 
     addMessage({ id: crypto.randomUUID(), role: "user", content: text });
     addMessage({ id: crypto.randomUUID(), role: "assistant", content: "" });

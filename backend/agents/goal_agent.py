@@ -28,7 +28,7 @@ from agents.conversation import format_conversation_for_prompt
 from agents.state import PayNexusState
 from agents.tables import resolve_selected_tables
 from analytics.goal_progress import format_goals_for_prompt, goal_progress_table
-from analytics.spending_trends import average_monthly_net_savings
+from analytics.spending_trends import average_monthly_net_savings, net_savings_by_period
 from config import config
 
 
@@ -100,7 +100,11 @@ def goal_agent_node(state: PayNexusState) -> dict:
 
     prompt_parts = [
         "Goals (already computed — quote directly, do not recompute):\n"
-        + format_goals_for_prompt(goals, savings_rate)
+        + format_goals_for_prompt(
+            goals,
+            savings_rate,
+            period_net_savings=[(p.period, p.total_spent) for p in net_savings_by_period(transactions)],
+        )
     ]
 
     conversation_block = format_conversation_for_prompt(state.get("conversation") or [])

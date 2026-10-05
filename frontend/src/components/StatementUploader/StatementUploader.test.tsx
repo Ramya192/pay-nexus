@@ -6,6 +6,7 @@ import { useAuthStore } from "../../store/authStore";
 import { useTransactionStore } from "../../store/transactionStore";
 import * as statementApi from "../../api/statement";
 import * as pdfText from "../../utils/pdfText";
+import { PdfPasswordError } from "../../utils/pdfPasswordError";
 import * as encryption from "../../crypto/clientEncryption";
 import * as contentHash from "../../utils/contentHash";
 
@@ -85,6 +86,34 @@ describe("StatementUploader", () => {
     expect(screen.getByLabelText("Period label")).toHaveValue("2026-07");
   });
 
+  it("lets you fix an uncategorized row before saving, and marks it user-corrected", async () => {
+    const user = userEvent.setup();
+    vi.mocked(pdfText.extractPdfText).mockResolvedValue("statement text");
+    vi.spyOn(statementApi, "parseStatementText").mockResolvedValue({
+      transactions: [txn({ description: "UPI-SOMEONE", category: "Uncategorized", category_source: null })],
+      skipped_row_count: 0,
+      truncated_chars: 0,
+    });
+    const save = vi.spyOn(statementApi, "saveStatement").mockResolvedValue({
+      id: "s1",
+      source_account: "HDFC Checking",
+      period_label: "2026-07",
+      created_at: "2026-07-31",
+    });
+    render(<StatementUploader />);
+    await nameAccount(user);
+    await user.upload(screen.getByLabelText(/Upload bank statement/), pdfFile());
+
+    await waitFor(() => expect(screen.getByText(/1 row\(s\) couldn't be matched/)).toBeInTheDocument());
+    await user.selectOptions(screen.getByLabelText("Category for UPI-SOMEONE"), "Transfers");
+    expect(screen.queryByText(/couldn't be matched and were filled in/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Save statement" }));
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    const savedRows = vi.mocked(encryption.encryptJSON).mock.calls[0][1] as statementApi.ParsedTransaction[];
+    expect(savedRows[0]).toMatchObject({ category: "Transfers", category_source: "user_corrected" });
+  });
+
   it("parses a CSV via file.text() (no PDF extraction) and suggests a month-range label when it spans multiple months", async () => {
     const user = userEvent.setup();
     const extract = vi.mocked(pdfText.extractPdfText);
@@ -150,6 +179,56 @@ describe("StatementUploader", () => {
     await waitFor(() =>
       expect(screen.getByText(/Couldn't find any text in that PDF/)).toBeInTheDocument()
     );
+  });
+
+  describe("password-protected PDFs", () => {
+    it("prompts for the password, then retries extraction with it and continues to review", async () => {
+      const user = userEvent.setup();
+      const extract = vi.mocked(pdfText.extractPdfText);
+      extract.mockRejectedValueOnce(new PdfPasswordError(false)).mockResolvedValueOnce("statement text");
+      vi.spyOn(statementApi, "parseStatementText").mockResolvedValue({
+        transactions: [txn()],
+        skipped_row_count: 0,
+        truncated_chars: 0,
+      });
+      render(<StatementUploader />);
+      await nameAccount(user);
+
+      await user.upload(screen.getByLabelText(/Upload bank statement/), pdfFile());
+      await user.type(await screen.findByLabelText(/password-protected/), "s3cret");
+      await user.click(screen.getByRole("button", { name: "Unlock" }));
+
+      await waitFor(() => expect(screen.getByText("1 transaction(s) found — review below, then save.")).toBeInTheDocument());
+      expect(extract).toHaveBeenLastCalledWith(expect.any(File), "s3cret");
+      expect(screen.queryByLabelText(/password-protected/)).not.toBeInTheDocument();
+    });
+
+    it("keeps the prompt open with an error when the password is wrong", async () => {
+      const user = userEvent.setup();
+      vi.mocked(pdfText.extractPdfText).mockRejectedValue(new PdfPasswordError(true));
+      render(<StatementUploader />);
+      await nameAccount(user);
+
+      await user.upload(screen.getByLabelText(/Upload bank statement/), pdfFile());
+      await user.type(await screen.findByLabelText(/password-protected/), "wrong");
+      await user.click(screen.getByRole("button", { name: "Unlock" }));
+
+      await waitFor(() => expect(screen.getByText(/That password didn't work/)).toBeInTheDocument());
+      expect(screen.getByLabelText(/password-protected/)).toBeInTheDocument();
+    });
+
+    it("dismisses the prompt on Cancel", async () => {
+      const user = userEvent.setup();
+      vi.mocked(pdfText.extractPdfText).mockRejectedValue(new PdfPasswordError(false));
+      render(<StatementUploader />);
+      await nameAccount(user);
+
+      await user.upload(screen.getByLabelText(/Upload bank statement/), pdfFile());
+      await screen.findByLabelText(/password-protected/);
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+      expect(screen.queryByLabelText(/password-protected/)).not.toBeInTheDocument();
+    });
   });
 
   describe("save", () => {

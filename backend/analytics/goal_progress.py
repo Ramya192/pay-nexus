@@ -77,7 +77,12 @@ def compute_goal_progress(goals: list[dict], today: date | None = None) -> list[
     return results
 
 
-def format_goals_for_prompt(goals: list[dict], average_monthly_savings: float | None, today: date | None = None) -> str:
+def format_goals_for_prompt(
+    goals: list[dict],
+    average_monthly_savings: float | None,
+    today: date | None = None,
+    period_net_savings: list[tuple[str, float]] | None = None,
+) -> str:
     progress = compute_goal_progress(goals, today)
     if not progress:
         return "No goals on file yet — nothing to track."
@@ -96,6 +101,22 @@ def format_goals_for_prompt(goals: list[dict], average_monthly_savings: float | 
             else:
                 line += f" — target date {p.target_date} has passed"
         lines.append(line)
+        if (
+            average_monthly_savings is not None
+            and p.required_monthly_savings is not None
+            and p.days_remaining is not None
+        ):
+            enough = average_monthly_savings >= p.required_monthly_savings
+            lines.append(
+                f"  Pace verdict for {p.name} (already computed — state it as given): current average "
+                f"savings of ₹{average_monthly_savings:,.0f}/month "
+                + (
+                    f"is ENOUGH for the ₹{p.required_monthly_savings:,.0f}/month needed — no adjustment is required."
+                    if enough
+                    else f"is NOT ENOUGH for the ₹{p.required_monthly_savings:,.0f}/month needed — a shortfall of "
+                    f"₹{p.required_monthly_savings - average_monthly_savings:,.0f}/month."
+                )
+            )
 
     if average_monthly_savings is not None:
         lines.append(
@@ -109,6 +130,15 @@ def format_goals_for_prompt(goals: list[dict], average_monthly_savings: float | 
             f"exactly one month (e.g. a 46-day statement) and this number has already been "
             f"converted to a real-month rate."
         )
+        if period_net_savings:
+            lines.append(
+                "Net savings for each individual statement period on file (income minus expenses, "
+                "already computed; a negative figure means that period spent more than it earned): "
+                + "; ".join(f"{period}: ₹{total:,.0f}" for period, total in period_net_savings)
+                + ". When the question is about ONE specific month or period (e.g. \"how much did I "
+                "save in May\"), quote that period's own figure from this list — never the average "
+                "above — and if that period isn't listed, say there's no statement for it."
+            )
     else:
         lines.append(
             "No transaction data on file to estimate an actual savings rate from — only the "

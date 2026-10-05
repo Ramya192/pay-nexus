@@ -32,6 +32,7 @@ instead of a separate direct OpenAI client/key.
 """
 
 import json
+import re
 
 from pydantic import BaseModel
 
@@ -138,7 +139,49 @@ async def extract_scenario(user_query: str, conversation: list[dict], goal_names
         "payslip_delta_amount": _num_or_none(parsed.get("payslip_delta_amount")),
         "payslip_delta_percent_of_basic": _num_or_none(parsed.get("payslip_delta_percent_of_basic")),
     }
+    _reconcile_payslip_change(user_query, scenario)
     return scenario, metrics
+
+
+_UP_WORDS = r"more|extra|additional|higher|greater"
+_DOWN_WORDS = r"less|lower|fewer|lesser"
+# "₹2,000 more" / "2000 less" -- the amount comes before the relative word.
+_AMOUNT_THEN_WORD = re.compile(
+    rf"(?:₹|rs\.?\s*)?\s*(\d[\d,]*(?:\.\d+)?)\s*(k)?\s+({_UP_WORDS}|{_DOWN_WORDS})\b", re.IGNORECASE
+)
+# "increase it by ₹2,000" / "cut by 500" -- the verb comes before the amount.
+_VERB_BY_AMOUNT = re.compile(
+    r"\b(increase[sd]?|raise[sd]?|add(?:ed)?|hike[sd]?|decrease[sd]?|reduce[sd]?|cut|drop(?:ped)?|lower(?:ed)?)\b"
+    r"[^\d₹]{0,25}by\s*(?:₹|rs\.?\s*)?\s*(\d[\d,]*(?:\.\d+)?)\s*(k)?",
+    re.IGNORECASE,
+)
+
+
+def _amount(digits: str, k: str | None) -> float:
+    return float(digits.replace(",", "")) * (1000 if k else 1)
+
+
+def _reconcile_payslip_change(user_query: str, scenario: dict) -> None:
+    """The model sometimes returns "what if my HRA was ₹2,000 more" as an
+    absolute new value (HRA set to ₹2,000) instead of a +₹2,000 delta -- a
+    wrong, confidently-stated net-pay drop. When the query's own wording is
+    unambiguously relative and the amount matches the extracted
+    payslip_new_value, convert it to a signed delta."""
+    new_value = scenario.get("payslip_new_value")
+    if new_value is None or scenario.get("payslip_delta_amount") is not None:
+        return
+    for m in _AMOUNT_THEN_WORD.finditer(user_query):
+        if _amount(m.group(1), m.group(2)) == new_value:
+            sign = 1 if re.fullmatch(_UP_WORDS, m.group(3), re.IGNORECASE) else -1
+            scenario["payslip_delta_amount"] = sign * new_value
+            scenario["payslip_new_value"] = None
+            return
+    for m in _VERB_BY_AMOUNT.finditer(user_query):
+        if _amount(m.group(2), m.group(3)) == new_value:
+            up = re.match(r"(increase|raise|add|hike)", m.group(1), re.IGNORECASE)
+            scenario["payslip_delta_amount"] = new_value if up else -new_value
+            scenario["payslip_new_value"] = None
+            return
 
 
 def _num_or_none(value) -> float | None:

@@ -294,3 +294,61 @@ class TestWebSearchCompleteText:
 
         assert text == good
         assert invocation_count["n"] == 2
+
+
+class TestConnectivityErrorsAreTreatedLikeTimeouts:
+    """Seen live: a connect timeout to Foundry surfaced as ChatClientException (wrapping
+    openai.APITimeoutError wrapping httpx.ConnectTimeout), which skipped the retry and showed the
+    user a generic "Something went wrong". It must be retried and, if it persists, reported as
+    FoundryUnavailableError (the friendly "high demand" message)."""
+
+    @pytest.fixture(autouse=True)
+    def _fast_backoff(self, monkeypatch):
+        monkeypatch.setattr(agent_framework_llm, "_TIMEOUT_RETRY_BACKOFF_BASE_S", 0.01)
+        monkeypatch.setattr(agent_framework_llm, "_TIMEOUT_RETRY_BACKOFF_JITTER_S", 0.0)
+
+    @staticmethod
+    def _wrapped_connect_timeout():
+        import httpx
+        import openai
+        from agent_framework.exceptions import ChatClientException
+
+        try:
+            try:
+                raise httpx.ConnectTimeout("connect timed out")
+            except httpx.ConnectTimeout as inner:
+                raise openai.APITimeoutError(request=httpx.Request("POST", "https://x")) from inner
+        except openai.APITimeoutError as mid:
+            err = ChatClientException("service failed to complete the prompt: Request timed out.")
+            err.__cause__ = mid
+            return err
+
+    def test_wrapped_connect_timeout_is_recognised(self):
+        assert agent_framework_llm._is_transient_connectivity_error(self._wrapped_connect_timeout())
+        assert not agent_framework_llm._is_transient_connectivity_error(ValueError("a real bug"))
+
+    def test_it_is_retried_and_recovers(self):
+        calls = {"n": 0}
+
+        async def flaky():
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise self._wrapped_connect_timeout()
+            return "ok"
+
+        assert asyncio.run(agent_framework_llm._run_with_timeout("t", flaky, timeout=5)) == "ok"
+        assert calls["n"] == 2
+
+    def test_when_it_persists_the_friendly_error_is_raised(self):
+        async def always_down():
+            raise self._wrapped_connect_timeout()
+
+        with pytest.raises(agent_framework_llm.FoundryUnavailableError):
+            asyncio.run(agent_framework_llm._run_with_timeout("t", always_down, timeout=5))
+
+    def test_unrelated_errors_still_propagate_immediately(self):
+        async def broken():
+            raise ValueError("schema bug")
+
+        with pytest.raises(ValueError):
+            asyncio.run(agent_framework_llm._run_with_timeout("t", broken, timeout=5))

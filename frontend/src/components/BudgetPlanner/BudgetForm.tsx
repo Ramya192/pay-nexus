@@ -4,6 +4,7 @@ import { fetchSuggestedBudget, saveBudget } from "../../api/budget";
 import { encryptJSON } from "../../crypto/clientEncryption";
 import { useAuthStore } from "../../store/authStore";
 import { BUDGET_CATEGORIES, useBudgetStore } from "../../store/budgetStore";
+import { usePayslipHistoryStore } from "../../store/payslipHistoryStore";
 import { usePayslipStore } from "../../store/payslipStore";
 
 // Rough monthly-gross estimate for the suggested-budget pre-fill only — not
@@ -48,12 +49,19 @@ export function BudgetForm() {
   // setStatus("idle") immediately overwrote the "saved" confirmation in the
   // same tick it appeared, so the checkmark never actually stayed visible.
   const justSaved = useRef(false);
+  // Once the user types in the form, a later income change must not overwrite their edits.
+  const userEdited = useRef(false);
+  // Right after login the budget tab mounts before payslip history finishes hydrating, so the
+  // income is derived at render and the effect re-runs when it arrives (not only on mount).
+  const latestSaved = usePayslipHistoryStore((s) => s.snapshots.at(-1) ?? null);
+  const monthlyIncome = roughMonthlyIncome(payslipData) ?? roughMonthlyIncome(latestSaved);
 
   useEffect(() => {
     if (justSaved.current) {
       justSaved.current = false;
       return;
     }
+    if (userEdited.current && !storedBudget) return;
     if (storedBudget) {
       const next: Record<string, string> = {};
       for (const category of BUDGET_CATEGORIES) {
@@ -66,9 +74,9 @@ export function BudgetForm() {
 
     // Nothing saved yet — pre-fill from a salary-bracket-scaled suggestion.
     let cancelled = false;
-    fetchSuggestedBudget(roughMonthlyIncome(payslipData))
+    fetchSuggestedBudget(monthlyIncome)
       .then((suggested) => {
-        if (cancelled) return;
+        if (cancelled || userEdited.current) return;
         const next: Record<string, string> = {};
         for (const category of BUDGET_CATEGORIES) {
           if (typeof suggested.budgets[category] === "number") next[category] = String(suggested.budgets[category]);
@@ -82,12 +90,12 @@ export function BudgetForm() {
     return () => {
       cancelled = true;
     };
-    // Only re-run if storedBudget itself changes identity (e.g. login
-    // hydration landing later) — not on every payslipData keystroke.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storedBudget]);
+    // Re-run when the saved budget lands or the derived income changes -- a number, so
+    // not on every payslipData keystroke.
+  }, [storedBudget, monthlyIncome]);
 
   function handleChange(category: string, value: string) {
+    userEdited.current = true;
     setValues((v) => ({ ...v, [category]: value }));
     setStatus("idle");
   }

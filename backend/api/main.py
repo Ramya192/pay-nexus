@@ -27,8 +27,7 @@ from security.rate_limit import limiter
 # existing dev/test behavior changes. Auto-instruments FastAPI (request
 # latency, status codes, exceptions) and outbound httpx/requests calls with
 # no per-route code -- this is what closes the "no APM/tracing, every number
-# in the README came from a one-off command" gap (see PayNexus Scorecard.html
-# Ops/cost section).
+# in the README came from a one-off command" gap.
 if config.APPLICATIONINSIGHTS_CONNECTION_STRING:
     from azure.monitor.opentelemetry import configure_azure_monitor
 

@@ -1,3 +1,5 @@
+import { PdfPasswordError } from "./pdfPasswordError";
+
 function isTextItem(item: unknown): item is { str: string } {
   return (
     typeof item === "object" &&
@@ -37,12 +39,24 @@ async function loadPdfjs() {
  * never leaves the device. Shared by PDFParser.tsx (single, reviewed
  * upload) and PayslipHistoryUpload.tsx (bulk, save-without-review) so the
  * extraction logic exists in exactly one place.
+ *
+ * An encrypted PDF throws PdfPasswordError (`incorrect` is true when a
+ * `password` was given but rejected); the caller prompts and retries with the
+ * password. Decryption happens in pdf.js here, so the password stays local.
  */
-export async function extractPdfText(file: File): Promise<string> {
+export async function extractPdfText(file: File, password?: string): Promise<string> {
   pdfjsLibPromise ??= loadPdfjs();
   const pdfjsLib = await pdfjsLibPromise;
   const buffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+  let pdf;
+  try {
+    pdf = await pdfjsLib.getDocument({ data: buffer, password }).promise;
+  } catch (err) {
+    if (err instanceof pdfjsLib.PasswordException) {
+      throw new PdfPasswordError(err.code === pdfjsLib.PasswordResponses.INCORRECT_PASSWORD);
+    }
+    throw err;
+  }
   let text = "";
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);

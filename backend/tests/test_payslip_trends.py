@@ -211,3 +211,41 @@ class TestFormatting:
         table = duplicates_table(snapshots)
         assert table["headers"] == ["Month", "Saved copies"]
         assert table["rows"] == [["2026-01", "2"]]
+
+
+class TestLatestChange:
+    def test_component_added_in_latest_month_shows_as_a_change(self):
+        from payslip_trends import compute_latest_change, format_latest_change_for_prompt
+
+        may = {"month": "2026-05", "basic": 80000, "bonus": 10000, "pfEmployee": 9000, "tds": 20000}
+        jun = {"month": "2026-06", "basic": 80000, "bonus": 10000, "specialAllowance": 15000, "pfEmployee": 9000, "tds": 20000}
+        _, _, rows = compute_latest_change([may, jun])
+        sa = next(r for r in rows if r.label == "Special Allowance")
+        assert (sa.previous, sa.latest) == (0.0, 15000)
+        text = format_latest_change_for_prompt([may, jun])
+        assert "did NOT drop" in text
+
+    def test_component_dropped_in_latest_month_shows_as_a_decrease(self):
+        from payslip_trends import compute_latest_change
+
+        a = {"month": "2026-05", "basic": 80000, "bonus": 5000}
+        b = {"month": "2026-06", "basic": 80000}
+        _, _, rows = compute_latest_change([a, b])
+        bonus = next(r for r in rows if r.label == "Bonus")
+        assert bonus.delta == -5000
+
+    def test_no_drop_note_when_take_home_fell(self):
+        from payslip_trends import format_latest_change_for_prompt
+
+        a = {"month": "2026-05", "basic": 80000, "tds": 10000}
+        b = {"month": "2026-06", "basic": 80000, "tds": 15000}
+        assert "did NOT drop" not in format_latest_change_for_prompt([a, b])
+
+    def test_duplicate_special_allowance_and_bonus_flagged_only_when_equal(self):
+        from payslip_trends import format_latest_change_for_prompt
+
+        a = {"month": "2026-05", "basic": 80000}
+        same = {"month": "2026-06", "basic": 80000, "specialAllowance": 9000, "bonus": 9000}
+        diff = {"month": "2026-06", "basic": 80000, "specialAllowance": 9000, "bonus": 4000}
+        assert "Data check" in format_latest_change_for_prompt([a, same])
+        assert "Data check" not in format_latest_change_for_prompt([a, diff])

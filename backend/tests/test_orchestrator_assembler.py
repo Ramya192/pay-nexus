@@ -210,3 +210,14 @@ class TestCapabilityGapNode:
         """Deterministic — same input, same output, no network/mock setup
         required. Locks in the node's own 'no LLM call' design intent."""
         assert capability_gap_node({}) == capability_gap_node({"user_query": "delete my Goa trip goal"})
+
+
+def test_digest_llm_calls_included_in_token_usage():
+    from agents.llm_metrics import LLMCallMetrics
+
+    classifier = LLMCallMetrics(agent="c", model="gpt-4o", input_tokens=100, output_tokens=7, cost_usd=0.001, latency_ms=1)
+    digest = LLMCallMetrics(agent="digest_agent", model="gpt-4o", input_tokens=2500, output_tokens=180, cost_usd=0.01, latency_ms=1)
+    state = {"digest_response": '{"explanation": "recap", "tables": []}', "orchestrator_llm_calls": [classifier], "digest_llm_calls": [digest]}
+    usage = assembler_node(state)["token_usage"]
+    assert usage["total_output_tokens"] == 187
+    assert usage["total_input_tokens"] == 2600

@@ -1,6 +1,8 @@
 import { useState, type ChangeEvent } from "react";
 import { parsePayslipText } from "../../api/payslip";
+import { PdfPasswordError } from "../../utils/pdfPasswordError";
 import { extractPdfText } from "../../utils/pdfText";
+import { PdfPasswordPrompt } from "../PdfPasswordPrompt";
 
 type Status = "idle" | "reading" | "parsing" | "error";
 
@@ -26,16 +28,22 @@ export function PDFParser({
 }) {
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<string | null>(null);
+  // Set while an encrypted PDF is waiting for its password.
+  const [passwordPending, setPasswordPending] = useState<{ file: File; incorrect: boolean } | null>(null);
 
-  async function handleFile(e: ChangeEvent<HTMLInputElement>) {
+  function handleFile(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = ""; // clear so re-selecting the same file re-fires onChange
     if (!file) return;
+    void processFile(file);
+  }
 
+  async function processFile(file: File, password?: string) {
     setError(null);
+    setPasswordPending(null);
     setStatus("reading");
     try {
-      const text = await extractPdfText(file);
+      const text = await extractPdfText(file, password);
       if (!text.trim()) {
         throw new Error(
           "Couldn't find any text in that PDF — it may be a scanned image. Try entering details manually instead."
@@ -47,6 +55,11 @@ export function PDFParser({
       onExtracted(fields);
       setStatus("idle");
     } catch (err) {
+      if (err instanceof PdfPasswordError) {
+        setStatus("idle");
+        setPasswordPending({ file, incorrect: err.incorrect });
+        return;
+      }
       setStatus("error");
       setError(err instanceof Error ? err.message : "Couldn't read that PDF.");
     }
@@ -71,6 +84,15 @@ export function PDFParser({
       />
       {status === "reading" && <p className="text-xs text-slate-500">Reading PDF…</p>}
       {status === "parsing" && <p className="text-xs text-slate-500">Extracting fields…</p>}
+      {passwordPending && (
+        <PdfPasswordPrompt
+          fileName={passwordPending.file.name}
+          incorrect={passwordPending.incorrect}
+          disabled={status === "reading" || status === "parsing"}
+          onSubmit={(pw) => void processFile(passwordPending.file, pw)}
+          onCancel={() => setPasswordPending(null)}
+        />
+      )}
       {error && <p className="text-xs text-red-600">{error}</p>}
     </div>
   );

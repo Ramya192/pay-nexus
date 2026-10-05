@@ -76,6 +76,7 @@ class AnalyticsRequest(BaseModel):
 
 class AnalyticsResponse(BaseModel):
     category_breakdown: list[dict]  # [{category, total_spent}, ...], highest first
+    excluded_from_spending: list[dict] = []  # [{category, total_spent}] -- money out that the pie deliberately leaves out (Investments, Transfers, Credit Card Payment)
     savings_projection: dict | None  # None when there's not enough history to project — see analytics/spending_trends.py's project_net_savings
 
 
@@ -92,7 +93,7 @@ class TransactionOut(BaseModel):
 class StatementParseResponse(BaseModel):
     transactions: list[TransactionOut]
     skipped_row_count: int  # CSV rows normalize.py couldn't read (missing date/description/amount)
-    truncated_chars: int  # >0 only on the PDF path, if input exceeded statement_extraction.py's cap
+    truncated_chars: int  # >0 only on the PDF path, if part of the statement couldn't be parsed (see statement_extraction.py)
 
 
 class StatementSaveRequest(BaseModel):
@@ -118,6 +119,15 @@ class StatementUpdateRequest(BaseModel):
 
     ciphertext_b64: str
     iv_b64: str
+
+
+class StatementRenameRequest(BaseModel):
+    """PATCH /statement/{id}/rename — changes only the plaintext labels
+    (account name and/or period label); the encrypted transactions are
+    untouched. Either field may be omitted to leave it as is."""
+
+    source_account: str | None = None
+    period_label: str | None = None
 
 
 class StatementOut(BaseModel):

@@ -74,6 +74,37 @@ describe("computeAlerts", () => {
       // (en-IN groups by lakh/crore, not thousands)
       expect(alert!.message).toContain("4,00,000");
     });
+
+    it("matches the backend gap calculator: counts PPF and annualized employee PF toward 80C", () => {
+      // PPF 60k + life insurance 88k + loan principal 47k = 195k, already over the 150k cap
+      // even before PF, so 80C remaining is 0. 80D senior cap 50k fully used (60k premium).
+      // Only 24(b) room (200k) is left -- same total the Savings Advisor's gaps table gives.
+      const profile: FinancialProfile = {
+        ppf: 60_000,
+        lifeInsurancePremium: 88_000,
+        homeLoanPrincipalPaid: 47_000,
+        healthInsurancePremium: 60_000,
+        healthInsuranceForSeniorCitizen: true,
+      };
+      const alert = findAlert(computeAlerts(now, [{ month: "2026-06", pfEmployee: 10_660 }], profile), "deduction-headroom");
+      expect(alert!.message).toContain("2,00,000");
+    });
+
+    it("counts the latest payslip's PF x 12 toward 80C", () => {
+      const profile: FinancialProfile = { homeLoanInterestPaid: 200_000, healthInsurancePremium: 25_000 };
+      // PF 5,000/month = 60k/yr -> 90k of 80C room left, below nothing else open
+      const snaps = [
+        { month: "2026-01", pfEmployee: 1_000 },
+        { month: "2026-06", pfEmployee: 5_000 },
+      ];
+      const alert = findAlert(computeAlerts(now, snaps, profile), "deduction-headroom");
+      expect(alert!.message).toContain("90,000");
+    });
+
+    it("caps 80D at the limit even when the premium exceeds it", () => {
+      const profile: FinancialProfile = { healthInsurancePremium: 90_000, homeLoanInterestPaid: 200_000, elssMutualFunds: 150_000 };
+      expect(findAlert(computeAlerts(now, [], profile), "deduction-headroom")).toBeUndefined();
+    });
   });
 
   describe("stale-payslip", () => {

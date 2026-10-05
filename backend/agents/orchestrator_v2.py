@@ -48,6 +48,7 @@ several now go through the exact same code path.
 
 import asyncio
 import json
+import logging
 from collections.abc import AsyncGenerator
 from typing import Callable, Literal
 
@@ -69,6 +70,8 @@ from agents.whatif_agent import whatif_agent_node
 from compression import token_budget
 from compression.context_compressor import cap_session_history, compress_in_session
 from config import config
+
+logger = logging.getLogger(__name__)
 
 AgentKey = Literal[
     "payslip", "regulatory", "nudge", "spending", "goal", "budget", "whatif", "digest", "unsupported"
@@ -253,11 +256,43 @@ async def _run_agents_concurrently(
     ConcurrentBuilder). Works identically for 1 agent or several — no
     special-casing needed, unlike the ConcurrentBuilder-based version this
     replaced."""
-    node_results = await asyncio.gather(*(asyncio.to_thread(node_map[key], effective_state) for key in agent_keys))
+    node_results = await asyncio.gather(
+        *(asyncio.to_thread(node_map[key], effective_state) for key in agent_keys), return_exceptions=True
+    )
+    failures = [(key, r) for key, r in zip(agent_keys, node_results) if isinstance(r, BaseException)]
+    if len(failures) == len(agent_keys):
+        # Nothing to salvage -- surface the original error exactly as before, so chat.py's
+        # specific handling (e.g. the Foundry "high demand" message) still applies.
+        raise failures[0][1]
     merged: dict = {"orchestrator_llm_calls": [classifier_metrics]}
-    for node_result in node_results:
-        merged.update(node_result)
+    for key, node_result in zip(agent_keys, node_results):
+        if isinstance(node_result, BaseException):
+            # One agent failing must not discard the answers the others already produced.
+            logger.error("Agent %r failed; answering the rest of the turn without it.", key, exc_info=node_result)
+            merged.update(_failed_agent_result(key))
+        else:
+            merged.update(node_result)
     return assembler_node(merged)
+
+
+# Where each agent's answer lands in state, and whether the assembler expects JSON or plain text.
+_AGENT_RESPONSE_KEY = {
+    "payslip": ("payslip_response", True),
+    "regulatory": ("regulatory_response", False),
+    "nudge": ("nudge_response", False),
+    "spending": ("spending_response", True),
+    "goal": ("goal_response", True),
+    "budget": ("budget_response", True),
+    "whatif": ("scenario_response", True),
+    "digest": ("digest_response", True),
+    "unsupported": ("unsupported_response", False),
+}
+
+
+def _failed_agent_result(agent_key: str) -> dict:
+    state_key, is_json = _AGENT_RESPONSE_KEY[agent_key]
+    message = "I couldn't finish this part of your question just now — please ask it again on its own."
+    return {state_key: json.dumps({"explanation": message, "follow_up_suggestions": []}) if is_json else message}
 
 
 async def run_paynexus_workflow(

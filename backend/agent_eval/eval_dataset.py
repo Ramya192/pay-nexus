@@ -120,6 +120,35 @@ EVAL_CASES: list[EvalCase] = [
         },
         expected_keywords=["50,000", "55,000"],
     ),
+    # "Why did my take-home change" — direction must follow the computed net-pay
+    # delta, in both directions, and a component that only exists in the latest
+    # month (the bonus) must show up as the cause rather than being dropped.
+    EvalCase(
+        label="payslip_agent-takehome-rose-new-bonus",
+        agent="payslip_agent",
+        question="Why did my take-home drop this month?",
+        state={
+            "payslip_history": [
+                {"month": "2026-05", "basic": 60_000, "hra": 24_000, "pfEmployee": 7_200, "professionalTax": 200, "tds": 8_000},
+                {"month": "2026-06", "basic": 60_000, "hra": 24_000, "bonus": 10_000, "pfEmployee": 7_200, "professionalTax": 200, "tds": 9_000},
+            ]
+        },
+        expected_keywords=["68,600", "77,600", "9,000"],
+        forbidden_phrases=["take-home decreased", "take-home dropped by", "take-home fell"],
+    ),
+    EvalCase(
+        label="payslip_agent-takehome-dropped-higher-tds",
+        agent="payslip_agent",
+        question="Why did my take-home drop this month?",
+        state={
+            "payslip_history": [
+                {"month": "2026-05", "basic": 60_000, "hra": 24_000, "pfEmployee": 7_200, "professionalTax": 200, "tds": 8_000},
+                {"month": "2026-06", "basic": 60_000, "hra": 24_000, "pfEmployee": 7_200, "professionalTax": 200, "tds": 14_000},
+            ]
+        },
+        expected_keywords=["68,600", "62,600", "6,000"],
+        forbidden_phrases=["take-home increased", "take-home rose", "no decrease occurred"],
+    ),
     # No payslip attached at all — the one fully deterministic, non-LLM
     # early return in payslip_agent_node (see agents/payslip_agent.py).
     # Included as a harness sanity check: if this ever fails, the harness

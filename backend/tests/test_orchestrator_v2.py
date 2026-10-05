@@ -17,6 +17,7 @@ exercise the real thing end to end.
 """
 
 import asyncio
+import json
 
 import pytest
 
@@ -312,3 +313,42 @@ def test_real_end_to_end_multi_agent_question():
     assert "goal_agent" in result["active_agent"]
     assert "[BudgetPlanner Agent]" in result["final_response"]
     assert "[GoalTracker Agent]" in result["final_response"]
+
+
+class TestOneAgentFailing:
+    """A turn with several agents must still answer with the ones that worked."""
+
+    def test_surviving_agents_answer_and_the_failed_one_says_so(self, monkeypatch):
+        def good_goal(state):
+            return {"goal_response": json.dumps({"explanation": "Goal is 40% funded.", "follow_up_suggestions": []})}
+
+        def broken_budget(state):
+            raise RuntimeError("boom")
+
+        result = _run({"user_query": "q"}, {"budget": broken_budget, "goal": good_goal}, ["budget", "goal"], monkeypatch)
+        text = result["final_response"]
+        assert "Goal is 40% funded." in text
+        assert "couldn't finish this part" in text
+        assert set(result["active_agent"].split(",")) == {"budget_agent", "goal_agent"}
+
+    def test_a_plain_text_agent_failing_is_also_contained(self, monkeypatch):
+        def good_payslip(state):
+            return {"payslip_response": json.dumps({"explanation": "June TDS was ₹29,485.", "follow_up_suggestions": []})}
+
+        def broken_regulatory(state):
+            raise ValueError("bad cache doc")
+
+        result = _run(
+            {"user_query": "q"}, {"payslip": good_payslip, "regulatory": broken_regulatory}, ["payslip", "regulatory"], monkeypatch
+        )
+        assert "₹29,485" in result["final_response"]
+        assert "couldn't finish this part" in result["final_response"]
+
+    def test_when_every_agent_fails_the_original_error_still_propagates(self, monkeypatch):
+        import pytest as _pytest
+
+        def broken(state):
+            raise RuntimeError("only agent failed")
+
+        with _pytest.raises(RuntimeError, match="only agent failed"):
+            _run({"user_query": "q"}, {"budget": broken}, ["budget"], monkeypatch)

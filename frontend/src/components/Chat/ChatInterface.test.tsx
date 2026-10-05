@@ -166,6 +166,29 @@ describe("ChatInterface", () => {
       await waitFor(() => expect(screen.getByText("Second answer")).toBeInTheDocument());
     });
 
+    it("a queued question is sent with the data as it is when it runs, not when it was typed", async () => {
+      const user = userEvent.setup();
+      const first = deferred<void>();
+      const stream = vi.spyOn(chatApi, "streamChat").mockImplementationOnce(async (_p, onEvent) => {
+        onEvent({ event: "final", response: "First answer" });
+        return first.promise;
+      });
+      render(<ChatInterface />);
+      await user.type(screen.getByPlaceholderText("Am I on the best tax regime for me?"), "first question{Enter}");
+      await waitFor(() => expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument());
+      await user.type(screen.getByPlaceholderText("Am I on the best tax regime for me?"), "second question{Enter}");
+
+      // The user changes data while the second question waits in the queue.
+      act(() => usePayslipStore.getState().setPayslipData({ basic: 77_000 }));
+      stream.mockImplementationOnce(async (_p, onEvent) => {
+        onEvent({ event: "final", response: "Second answer" });
+      });
+      first.resolve();
+
+      await waitFor(() => expect(stream).toHaveBeenCalledTimes(2));
+      expect(stream.mock.calls[1][0]).toMatchObject({ query: "second question", payslipData: { basic: 77_000 } });
+    });
+
     it("a queued question can be individually removed without touching the in-flight turn", async () => {
       const user = userEvent.setup();
       const first = deferred<void>();
