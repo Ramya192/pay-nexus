@@ -8,6 +8,17 @@ monthly recap.
 
 **Live app: [PayNexus V2.1](https://ambitious-pebble-083cdaf10.7.azurestaticapps.net)** · API: `paynexus-api-v2.azurewebsites.net`
 
+**Highlights**
+
+- **Context compression keeps long chats cheap.** A sliding window plus short cross-session summaries,
+  sized to the model serving each turn. Measured on a 15-exchange test chat with real API usage: 12.5%
+  fewer input tokens per turn, and a long session summarised to 85.5% fewer characters. Details in
+  [Beyond the original scope](#beyond-the-original-scope-v21).
+- **The server never sees plaintext money.** Client-side AES-256-GCM encryption of payslips and
+  statements.
+- **Tested and measured.** 509 backend and 306 frontend tests, 80.9% branch coverage, plus RAG,
+  agent and compression eval harnesses.
+
 | Version | What it is | Status |
 |---|---|---|
 | **V2.1** (this branch, `foundry-v2`) | 8 agents on Microsoft Agent Framework and Azure AI Foundry | **Live and active** |
@@ -194,6 +205,23 @@ comes from Python, the model only narrates it.
   real case. A failed price lookup leaves that one goal's live value blank rather than breaking the tab.
 - **Monthly Digest agent** (the eighth agent above) and **payslip what-if math** (`payslip_math.py`,
   described in the migration section).
+- **Deduction headroom.** How much of the 80C (₹1.5 lakh), 80D and 24(b) limits is still unused. The
+  80C figure counts ELSS, PPF, life insurance, home-loan principal and the latest payslip's employee
+  PF x 12, from the same inputs as `tax_calculations.py`. The Savings Advisor shows the breakdown as a
+  deduction-gaps table, and a client-side alert (no LLM) shows the total as a banner, but only in
+  January to March and only when at least ₹20,000 is unused, since that is when investing still
+  helps before the financial year closes on 31 March.
+- **Context compression** (`compression/`, gated by `ENABLE_CONTEXT_COMPRESSION`). Level 1 is a
+  sliding window that keeps the last few exchanges verbatim, with no LLM call. Level 2 summarizes a
+  finished session into a short structured JSON the Savings Advisor reads next time, and caps how many
+  summaries stay in play. The window is sized to the model that will actually serve the turn
+  (`token_budget.headroom_tokens`: its context window minus reserved output, fixed overhead and a 15%
+  safety margin), so a small local model gets less history than gpt-4o. Measured with
+  `python -m compression.eval` on a synthetic 15-exchange chat (real API usage): the sliding window
+  saves 12.5% of input tokens per turn, cross-session summaries save 4.7% per later turn (cost
+  breaks even after about 6 turns), and one long session summarizes to 85.5% fewer characters
+  (2,408 to 350). The savings are modest per turn and grow with session length; the eval also caught
+  a real bug where summaries repeated the whole payslip and cost more than the raw history.
 
 **Future work:** voice input (Whisper) and receipt image parsing (GPT-4V). Manual cash entry covers
 the same need for now.
