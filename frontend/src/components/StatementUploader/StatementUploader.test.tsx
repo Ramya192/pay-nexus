@@ -292,6 +292,23 @@ describe("StatementUploader", () => {
       expect(useTransactionStore.getState().entries).toEqual([]);
     });
 
+    it("shows a failed save once, as an alert in the review panel next to the Save button", async () => {
+      const user = userEvent.setup();
+      vi.spyOn(statementApi, "saveStatement").mockRejectedValue({
+        response: { status: 409, data: { detail: "These transactions are already saved" } },
+      });
+      render(<StatementUploader />);
+      await getToReview(user);
+
+      await user.click(screen.getByRole("button", { name: "Save statement" }));
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent("These transactions are already saved");
+      expect(screen.getAllByText("These transactions are already saved")).toHaveLength(1);
+      // Same panel as the Save button, not above the upload area.
+      expect(alert.parentElement).toContainElement(screen.getByRole("button", { name: "Save statement" }));
+    });
+
     it("falls back to a generic duplicate message when the server gives no detail", async () => {
       const user = userEvent.setup();
       vi.spyOn(statementApi, "saveStatement").mockRejectedValue({ response: { status: 409 } });

@@ -285,3 +285,33 @@ class TestLeakAndPointerScrubbing:
 
         text = "Your budget-neutral switch saves ₹12,000 a year. Review the tax table below."
         assert _strip_cross_topic_pointer(text) == text
+
+    def test_any_follow_up_bullet_about_another_topic_is_dropped(self):
+        from agents.orchestrator import assembler_node
+
+        payslip = json.dumps(
+            {
+                "explanation": "The new regime saves you ₹110,760.",
+                "follow_up_suggestions": [
+                    "Determine how spending adjustments can influence tax savings.",
+                    "Review similar months' spending for consistent patterns.",
+                    "Explain how my gross salary was determined.",
+                ],
+            }
+        )
+        spending = json.dumps({"explanation": "Most spend is Rent.", "follow_up_suggestions": []})
+        out = assembler_node({"payslip_response": payslip, "spending_response": spending})["final_response"]
+        assert "spending adjustments" not in out and "similar months" not in out
+        assert "Explain how my gross salary was determined." in out
+        alone = assembler_node({"payslip_response": payslip})["final_response"]
+        assert "spending adjustments" in alone  # untouched when nothing else covers spending
+
+    def test_all_follow_up_bullets_dropped_leaves_no_empty_list_header(self):
+        from agents.orchestrator import assembler_node
+
+        payslip = json.dumps(
+            {"explanation": "Switch regimes.", "follow_up_suggestions": ["Review my spending patterns."]}
+        )
+        spending = json.dumps({"explanation": "Rent.", "follow_up_suggestions": []})
+        out = assembler_node({"payslip_response": payslip, "spending_response": spending})["final_response"]
+        assert "You can ask more like" not in out.split("SpendingAnalyser")[0]

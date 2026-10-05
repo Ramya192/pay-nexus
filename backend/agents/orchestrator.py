@@ -178,7 +178,10 @@ _POINTER_CUE = re.compile(
 )
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 _FOLLOW_UP_HEAD = "\n\nYou can ask more like:"
-_UPLOAD_BULLET = re.compile(r"^•\s*(?:upload|add|provide|connect|link)\b", re.IGNORECASE)
+
+
+def _is_other_topic_bullet(bullet: str) -> bool:
+    return not any(ch.isdigit() for ch in bullet) and bool(_OTHER_TOPIC_WORD.search(bullet))
 
 
 def _is_cross_topic_pointer(sentence: str) -> bool:
@@ -208,13 +211,13 @@ _OTHER_TOPIC_RESPONSE_KEYS = ("spending_response", "goal_response", "budget_resp
 
 
 def _strip_cross_topic_pointer_in_explanation(formatted: str) -> str:
-    """Applies _strip_cross_topic_pointer to the prose, and drops follow-up bullets that tell the user
-    to upload data for another topic, leaving the other follow-ups intact."""
+    """Applies _strip_cross_topic_pointer to the prose, and drops follow-up bullets that point at another
+    agent's topic ("Review similar months' spending…", "Upload spending data…"), leaving the others intact."""
     head, sep, tail = formatted.partition(_FOLLOW_UP_HEAD)
     head = _strip_cross_topic_pointer(head)
     if not sep:
         return head
-    bullets = [ln for ln in tail.split("\n") if not (_UPLOAD_BULLET.match(ln) and _OTHER_TOPIC_WORD.search(ln))]
+    bullets = [ln for ln in tail.split("\n") if not (ln.startswith("•") and _is_other_topic_bullet(ln))]
     if not any(ln.startswith("•") for ln in bullets):
         return head
     return head + sep + "\n".join(bullets)

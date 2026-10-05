@@ -207,7 +207,7 @@ export function StatementUploader() {
             onCancel={() => setPasswordPending(null)}
           />
         )}
-        {error && <p className="text-xs text-red-600">{error}</p>}
+        {error && !parsed && <p className="text-xs text-red-600">{error}</p>}
       </div>
 
       {parsed && (
@@ -277,6 +277,13 @@ export function StatementUploader() {
               {status === "saving" ? "Saving…" : "Save statement"}
             </button>
           </div>
+          {/* A save failure (e.g. "already saved") is shown next to the Save button the user just
+              clicked; up top it sat above the whole review list and was easy to miss. */}
+          {error && (
+            <p role="alert" className="text-xs text-red-600">
+              {error}
+            </p>
+          )}
         </div>
       )}
       {status === "saved" && <p className="text-xs text-emerald-600">Statement saved.</p>}

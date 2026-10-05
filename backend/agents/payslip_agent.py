@@ -181,6 +181,13 @@ regime recommendation's explanation must state the new-regime tax and the saving
 tax do I owe" or "recommend a regime" with a real number wanted → ["liability"] (add ["gaps"] too \
 if the deduction breakdown itself is also relevant, plus ["trends"] if multiple months matter).
 
+"follow_up_suggestions" are shown under "You can ask more like:", so each must be a short question \
+the user could ask you next, answerable from the payslip data already on file (e.g. "How much does \
+80C reduce my old-regime tax?", "Why did my take-home change in June?"). Never write a bullet that \
+asks the user to submit, upload, add or provide more data, never advise consulting a planner or \
+other professional, and never mention spending, budget or goals. Return an empty array rather than \
+a generic bullet.
+
 Respond with a JSON object: {"explanation": string, "tables": array of table keys (see above), \
 "follow_up_suggestions": array of strings}."""
 
