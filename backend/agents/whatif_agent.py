@@ -439,8 +439,8 @@ def _simulate_payslip_scenario(
         f"Payslip scenario — {field_label(field)}: ₹{change.baseline_value:,.0f} → ₹{change.scenario_value:,.0f}.",
         f"Net pay (already computed): ₹{baseline_net:,.0f} (baseline) → ₹{scenario_net:,.0f} (scenario) — "
         f"₹{abs(net_delta):,.0f} {direction} per month.",
-        f"Your answer must state these exact figures: {field_label(field)} ₹{change.baseline_value:,.0f} → "
-        f"₹{change.scenario_value:,.0f}, and net pay ₹{baseline_net:,.0f} → ₹{scenario_net:,.0f}.",
+        f"Key figures: {field_label(field)} ₹{change.baseline_value:,.0f} → "
+        f"₹{change.scenario_value:,.0f}; net pay ₹{baseline_net:,.0f} → ₹{scenario_net:,.0f}.",
     ]
     if change.clamped:
         applied = abs(change.baseline_value - change.scenario_value)

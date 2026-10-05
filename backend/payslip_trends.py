@@ -249,7 +249,7 @@ def format_latest_change_for_prompt(snapshots: list[dict]) -> str | None:
     if net is not None and net.delta != 0:
         word = "up" if net.delta > 0 else "down"
         lines.append(
-            f"Your answer must state these exact net pay figures: ₹{net.previous:,.0f} in {prev_month} to "
+            f"Key net pay figures: ₹{net.previous:,.0f} in {prev_month} to "
             f"₹{net.latest:,.0f} in {latest_month} ({word} ₹{abs(net.delta):,.0f})."
         )
     if net is not None and net.delta > 0:

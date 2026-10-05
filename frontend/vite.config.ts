@@ -3,6 +3,10 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
+// E2E_API_TARGET lets the Playwright run (e2e/) point the dev proxy at its throwaway backend
+// instead of a developer's real one on :8000.
+const API = process.env.E2E_API_TARGET ?? "http://localhost:8000";
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -10,17 +14,18 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: "./src/test/setup.ts",
     globals: true,
+    exclude: ["e2e/**", "node_modules/**"],
   },
   server: {
     proxy: {
-      "/auth": "http://localhost:8000",
-      "/chat": "http://localhost:8000",
-      "/payslip": "http://localhost:8000",
-      "/financial-profile": "http://localhost:8000",
-      "/statement": "http://localhost:8000",
-      "/goals": "http://localhost:8000",
-      "/budget": "http://localhost:8000",
-      "/aa": "http://localhost:8000",
+      "/auth": API,
+      "/chat": API,
+      "/payslip": API,
+      "/financial-profile": API,
+      "/statement": API,
+      "/goals": API,
+      "/budget": API,
+      "/aa": API,
     },
   },
 });

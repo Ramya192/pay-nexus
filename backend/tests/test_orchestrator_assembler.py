@@ -6,6 +6,8 @@ string rendered in a nudge card). No LLM call in any of this — assembler_node
 only merges state that upstream agent nodes already produced.
 """
 
+import json
+
 from agents.orchestrator import _format_agent_response, _normalize_impact, _parse_nudge, assembler_node, capability_gap_node
 
 
@@ -221,3 +223,32 @@ def test_digest_llm_calls_included_in_token_usage():
     usage = assembler_node(state)["token_usage"]
     assert usage["total_output_tokens"] == 187
     assert usage["total_input_tokens"] == 2600
+
+
+class TestLeakAndPointerScrubbing:
+    def test_leaked_model_instruction_is_removed(self):
+        from agents.orchestrator import _format_agent_response
+
+        raw = json.dumps(
+            {"explanation": "HRA goes up.\nYour answer must state these exact figures: HRA 1 -> 2, and net pay 3 -> 4.\nDone."}
+        )
+        out = _format_agent_response(raw)
+        assert "must state" not in out and "HRA goes up." in out and "Done." in out
+
+    def test_payslip_spending_pointer_stripped_only_when_other_agents_ran(self):
+        from agents.orchestrator import assembler_node
+
+        payslip = json.dumps(
+            {"explanation": "Switch to the new regime to save tax. For spending insights, consider reviewing data tracked in your spending tools."}
+        )
+        spending = json.dumps({"explanation": "Most spend is Rent.", "follow_up_suggestions": []})
+        both = assembler_node({"payslip_response": payslip, "spending_response": spending})["final_response"]
+        assert "spending tools" not in both and "Switch to the new regime to save tax." in both
+        alone = assembler_node({"payslip_response": payslip})["final_response"]
+        assert "spending tools" in alone  # untouched when nothing else covers spending
+
+    def test_real_figure_sentences_survive(self):
+        from agents.orchestrator import _strip_cross_topic_pointer
+
+        text = "Your TDS is Rs 29,485. Your new regime tax is lower."
+        assert _strip_cross_topic_pointer(text) == text

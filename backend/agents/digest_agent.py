@@ -67,8 +67,10 @@ highlighting (rarely more than two — this is a recap, not a data dump) and lis
 "tables" field; [] is a completely valid answer if the narrative alone covers it well.
 
 Accuracy rules: "this month" spending means ONLY the latest-period figures; never present the \
-all-periods history as this month's. If a goal has ₹0 saved / 0% progress, say so plainly and say \
-whether the savings pace would be enough — do not call it "on track" or "commendable progress". Do not \
+all-periods history as this month's. If a goal has ₹0 saved / 0% progress, say so plainly — do not \
+call it "on track" or "commendable progress". Only say whether the savings pace is enough when a \
+"Pace verdict" line is given for that goal; with no such line there is no pace data, so never claim the \
+pace "falls short" or "needs adjustment" and never infer one. Do not \
 describe income as both "consistent" and "trending up" — state the actual change figure once. No \
 evaluative filler ("efficient financial management", "solid performance"); state facts only.
 Pick at most two tables, and never pick a table whose rows repeat what your narrative already says \

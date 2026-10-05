@@ -22,6 +22,7 @@ for the dated log of bugs found and fixed that way.
 """
 
 import json
+import re
 
 from agents.llm_metrics import summarize as summarize_metrics
 from agents.state import PayNexusState
@@ -161,6 +162,39 @@ def capability_gap_node(state: PayNexusState) -> dict:
     }
 
 
+_LEAKED_INSTRUCTION = re.compile(r"Your answer must (?:state|name) these exact[^\n]*", re.IGNORECASE)
+# A closing sentence like "For spending insights, consider reviewing your spending tools." --
+# the payslip prompt forbids pointing at other topics, but the model sometimes rephrases one anyway.
+_CROSS_TOPIC_POINTER = re.compile(
+    r"(?:(?<=[.!?])\s+|^)(?:[^.!?\n]*\b(?:spending|budget|goals?|savings advisor|financial advisor)\b"
+    r"[^.!?\n]*\b(?:consult|review|refer|see|check|insights?|tools?|section|advisor)\b[^.!?\n]*|"
+    r"[^.!?\n]*\b(?:consult|review|refer to|see)\b[^.!?\n]*\b(?:spending|budget|goals?)\b[^.!?\n]*)[.!?]\s*$",
+    re.IGNORECASE,
+)
+
+
+def _scrub_leaked_instructions(text: str) -> str:
+    """An instruction line meant only for the model ("Your answer must state these exact figures: ...")
+    occasionally gets echoed into the narration -- strip it so users never see it."""
+    return _LEAKED_INSTRUCTION.sub("", text).strip()
+
+
+def _strip_cross_topic_pointer(text: str) -> str:
+    """Drops a trailing "for spending, consult ..." style sentence from a section when other agents'
+    sections are in the same response and already cover that topic."""
+    stripped = _CROSS_TOPIC_POINTER.sub("", text.rstrip()).rstrip()
+    return stripped or text
+
+
+_OTHER_TOPIC_RESPONSE_KEYS = ("spending_response", "goal_response", "budget_response", "scenario_response", "digest_response")
+
+
+def _strip_cross_topic_pointer_in_explanation(formatted: str) -> str:
+    """Applies _strip_cross_topic_pointer to the prose part only, leaving the follow-up list intact."""
+    head, sep, tail = formatted.partition("\n\nYou can ask more like:")
+    return _strip_cross_topic_pointer(head) + sep + tail
+
+
 def _format_agent_response(raw: str) -> str:
     """Payslip Reasoning (Agent 1) always returns structured JSON — good for
     the API contract (§2), unreadable dumped raw into a chat bubble. If
@@ -176,7 +210,7 @@ def _format_agent_response(raw: str) -> str:
     if not isinstance(parsed, dict) or "explanation" not in parsed:
         return raw
 
-    parts = [parsed["explanation"]]
+    parts = [_scrub_leaked_instructions(parsed["explanation"])]
     suggestions = parsed.get("follow_up_suggestions")
     if suggestions:
         # Labeled explicitly — found in testing that a bare bullet list
@@ -231,7 +265,10 @@ def assembler_node(state: PayNexusState) -> dict:
     nudge_card = None
 
     if state.get("payslip_response"):
-        sections.append(("Payslip Reasoning Agent", _format_agent_response(state["payslip_response"])))
+        payslip_text = _format_agent_response(state["payslip_response"])
+        if sum(bool(state.get(k)) for k in _OTHER_TOPIC_RESPONSE_KEYS):
+            payslip_text = _strip_cross_topic_pointer_in_explanation(payslip_text)
+        sections.append(("Payslip Reasoning Agent", payslip_text))
         active.append("payslip_agent")
     if state.get("regulatory_response"):
         sections.append(("Regulatory Intelligence Agent", state["regulatory_response"]))

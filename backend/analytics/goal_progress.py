@@ -141,8 +141,9 @@ def format_goals_for_prompt(
             )
     else:
         lines.append(
-            "No transaction data on file to estimate an actual savings rate from — only the "
-            "goals' own target math above is available; don't guess at a savings rate."
+            "No savings-pace figure is available, so don't judge whether the pace is enough. Report only "
+            "the goals' own figures above, and say nothing about transactions, budgets or spending data "
+            "being present or missing -- other topics are covered elsewhere."
         )
     return "\n".join(lines)
 
